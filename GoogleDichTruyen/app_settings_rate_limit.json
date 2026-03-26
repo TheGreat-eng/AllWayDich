@@ -1,11 +1,11 @@
 {
   "api_key_encrypted": "drARfIj7Nz4Fi1zHIafikBCtEmhQnRl6c91UHo4ljIpDrA9Kkfoy",
-  "input_file": "",
-  "output_file": "",
-  "model": "gemini-3-flash-preview",
-  "threads": "3",
-  "chunk_size": "3000",
-  "max_output_tokens": "8192",
+  "input_file": "C:/Users/dat/Documents/‘ Đại Nhật Phù Dư Long Phượng Nguyê.txt",
+  "output_file": "C:/Users/dat/Documents\\Dich_‘ Đại Nhật Phù Dư Long Phượng Nguyê_5710.txt",
+  "model": "gemini-3.1-flash-lite-preview",
+  "threads": "15",
+  "chunk_size": "8500",
+  "max_output_tokens": "10000",
   "temperature": "1.57",
   "model_rate_limits": {
     "gemini-3-flash-preview": 5,
