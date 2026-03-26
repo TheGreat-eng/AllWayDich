@@ -53,6 +53,7 @@ GoogleDichTruyen/app_settings.json
 # Translation history data (often large / local only)
 AWSDichTruyen/translation_history.json
 GoogleDichTruyen/translation_history.json
+*.json
 
 # Common secret files
 .env

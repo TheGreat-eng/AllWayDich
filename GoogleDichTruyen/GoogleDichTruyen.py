@@ -870,6 +870,68 @@ def validate_inputs():
 
 	return True
 
+def scan_story():
+	if not validate_inputs():
+		return
+	
+	api_key = api_key_entry.get().strip()
+	genai.configure(api_key=api_key)
+	
+	def run_scan():
+		try:
+			add_log("🔍 Đang quét thuật ngữ (dự kiến mất vài giây)...")
+			in_file = input_path.get()
+			chunk_size = int(chunk_size_var.get())
+			model_id = model_var.get()
+			temperature = float(temp_var.get())
+			
+			with open(in_file, "r", encoding="utf-8") as f:
+				chunks = split_text(f.read(), size=chunk_size)
+			
+			scan_chunks = chunks[:3]
+			text_to_scan = "\n\n".join(scan_chunks)
+			if len(text_to_scan) > 10000:
+				text_to_scan = text_to_scan[:10000]
+				
+			scan_prompt = (
+				"Bạn là một chuyên gia ngôn ngữ và biên tập viên truyện. Hãy đọc đoạn văn bản sau đây và trích xuất "
+				"tất cả các danh từ riêng, tên nhân vật, địa danh, tên môn phái, chiêu thức, bảo bối, cấp bậc tu luyện...\n"
+				"Trình bày kết quả dưới dạng danh sách, mỗi từ một dòng cấu trúc:\n"
+				"Từ gốc tiếng Trung => Từ dịch tiếng Việt\n"
+				"Ví dụ:\n"
+				"张三 => Trương Tam\n"
+				"青云门 => Thanh Vân Môn\n"
+				"Tuyệt đối KHÔNG xuất thêm giải thích, KHÔNG lặp lại từ, CHỈ in ra danh sách thuật ngữ.\n"
+				"Nếu không tìm thấy, trả về chữ 'Không có'."
+			)
+			
+			result = translate_with_gemini(model_id, scan_prompt, text_to_scan, temperature, 2048)
+			if result and "Không có" not in result and "=>" in result:
+				extracted_terms = result.strip()
+				add_log("✅ Quét xong thuật ngữ!")
+				
+				def ask_user():
+					if messagebox.askyesno("Kết quả quét thuật ngữ", f"Đã tìm thấy các thuật ngữ:\n\n{extracted_terms}\n\nBạn có muốn thêm vào Glossary không?"):
+						current_glossary = glossary_text.get("1.0", tk.END).strip()
+						if current_glossary:
+							new_glossary = current_glossary + "\n" + extracted_terms
+						else:
+							new_glossary = extracted_terms
+						glossary_text.delete("1.0", tk.END)
+						glossary_text.insert(tk.END, new_glossary)
+						add_log("📝 Đã thêm thuật ngữ vào Glossary.")
+				
+				root.after(0, ask_user)
+			else:
+				add_log("ℹ️ Không tìm thấy thuật ngữ đặc biệt nào.")
+				root.after(0, lambda: messagebox.showinfo("Kết quả", "Không tìm thấy thuật ngữ đặc biệt nào từ các đoạn đầu truyện."))
+				
+		except Exception as e:
+			add_log(f"🛑 Lỗi khi quét thuật ngữ: {e}")
+			root.after(0, lambda: messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {e}"))
+			
+	threading.Thread(target=run_scan, daemon=True).start()
+
 
 # ================= 1. PHƯƠNG THỨC KÍCH HOẠT (START) =================
 def start_translation():
@@ -1728,13 +1790,30 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)
 
 card_prompt = build_card(translate_tab, "📝 Prompt dịch giả", 0, 3, colspan=2)
 
+glossary_header_frame = tk.Frame(card_prompt, bg=PALETTE["panel"])
+glossary_header_frame.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+glossary_header_frame.columnconfigure(0, weight=1)
+
 tk.Label(
-	card_prompt,
+	glossary_header_frame,
 	text="Glossary/Từ điển thuật ngữ (mỗi dòng: nguồn => đích)",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=1, column=0, sticky="w", pady=(0, 4))
+).pack(side="left")
+
+tk.Button(
+	glossary_header_frame,
+	text="🔍 Quét thuật ngữ",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=2,
+	cursor="hand2",
+	command=scan_story
+).pack(side="right")
 
 glossary_text = tk.Text(
 	card_prompt,
