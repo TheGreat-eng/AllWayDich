@@ -40,6 +40,19 @@ python GoogleDichTruyen.py
 - **Max output tokens**: `256` đến `65536`
 - **Nhiệt độ**: `0` đến `1`
 
+### Glossary/Từ điển thuật ngữ
+- Có ô nhập riêng trong phần **Prompt dịch giả** để giữ nhất quán tên riêng, cảnh giới, xưng hô.
+- Cú pháp mỗi dòng:
+  - `nguồn => đích`
+  - hoặc `nguồn -> đích`
+  - hoặc `nguồn: đích`
+- Ví dụ:
+  - `筑基 => Trúc Cơ`
+  - `师兄 => sư huynh`
+  - `本座 => bổn tọa`
+- Dòng trống hoặc dòng bắt đầu bằng `#` sẽ được bỏ qua.
+- Glossary được lưu cùng cài đặt và tự áp vào prompt khi bấm dịch.
+
 Nếu nhập ngoài khoảng này, app sẽ báo lỗi trước khi chạy.
 
 ## 6) Quy trình dịch

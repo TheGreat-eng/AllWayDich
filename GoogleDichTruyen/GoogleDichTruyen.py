@@ -41,6 +41,8 @@ DEFAULT_PROMPT = (
 	"Giữ cách xuống dòng và bố cục đoạn văn hợp lý như truyện.\n\n"
 )
 
+DEFAULT_GLOSSARY = ""
+
 
 # ================= BIẾN ĐIỀU KHIỂN TẠM DỪNG =================
 is_paused = False
@@ -181,6 +183,7 @@ def load_settings():
 		"max_output_tokens": str(MAX_OUTPUT_TOKENS),
 		"temperature": "0.5",
 		"prompt": DEFAULT_PROMPT,
+		"glossary": DEFAULT_GLOSSARY,
 		"theme": "dark",
 	}
 
@@ -212,6 +215,7 @@ def save_settings():
 		"chunk_size": chunk_size_var.get(),
 		"max_output_tokens": max_output_tokens_var.get(),
 		"temperature": temp_var.get(),
+		"glossary": glossary_text.get("1.0", tk.END).strip(),
 		"prompt": prompt_text.get("1.0", tk.END).strip(),
 		"theme": current_theme,
 	}
@@ -235,6 +239,9 @@ def apply_settings(settings):
 	chunk_size_var.set(settings.get("chunk_size", str(CHUNK_SIZE)))
 	max_output_tokens_var.set(settings.get("max_output_tokens", str(MAX_OUTPUT_TOKENS)))
 	temp_var.set(settings.get("temperature", "0.5"))
+
+	glossary_text.delete("1.0", tk.END)
+	glossary_text.insert(tk.END, settings.get("glossary", DEFAULT_GLOSSARY))
 
 	prompt_text.delete("1.0", tk.END)
 	prompt_text.insert(tk.END, settings.get("prompt", DEFAULT_PROMPT))
@@ -271,6 +278,54 @@ def add_log(message):
 		log_box.config(state="disabled")
 
 	print(log_message.strip())
+
+
+def parse_glossary(raw_text):
+	"""Parse glossary lines.
+	Mỗi dòng theo định dạng: nguồn => đích (hoặc nguồn -> đích, nguồn: đích)
+	"""
+	entries = []
+	if not raw_text:
+		return entries
+
+	for line in raw_text.splitlines():
+		clean = line.strip()
+		if not clean or clean.startswith("#"):
+			continue
+
+		separator = None
+		for candidate in ["=>", "->", ":"]:
+			if candidate in clean:
+				separator = candidate
+				break
+
+		if not separator:
+			continue
+
+		source, target = clean.split(separator, 1)
+		source = source.strip()
+		target = target.strip()
+		if source and target:
+			entries.append((source, target))
+
+	return entries
+
+
+def build_prompt_with_glossary(base_prompt, glossary_entries):
+	"""Ghép glossary thành chỉ thị bắt buộc để tăng tính nhất quán xuyên chương."""
+	if not glossary_entries:
+		return base_prompt
+
+	glossary_lines = "\n".join([f"- {src} => {dst}" for src, dst in glossary_entries])
+	glossary_instruction = (
+		"\nQUY TẮC THUẬT NGỮ BẮT BUỘC (ƯU TIÊN CAO):\n"
+		"- Khi gặp thuật ngữ ở cột trái, phải dùng đúng thuật ngữ cột phải.\n"
+		"- Giữ nhất quán tuyệt đối toàn bộ chương và các chương tiếp theo.\n"
+		"- Không tự ý đổi biến thể khác nếu glossary đã quy định.\n"
+		f"{glossary_lines}\n"
+	)
+
+	return f"{base_prompt}\n{glossary_instruction}"
 
 
 def save_checkpoint(cp_file, index, text):
@@ -807,10 +862,10 @@ def validate_inputs():
 
 	try:
 		temp = float(temp_var.get())
-		if temp < 0 or temp > 1:
+		if temp < 0 or temp > 2:
 			raise ValueError
 	except Exception:
-		messagebox.showerror("Lỗi", "Nhiệt độ phải nằm trong khoảng 0 đến 1.")
+		messagebox.showerror("Lỗi", "Nhiệt độ phải nằm trong khoảng 0 đến 2.")
 		return False
 
 	return True
@@ -887,6 +942,11 @@ def process_translation_logic():
 		max_output_tokens = int(max_output_tokens_var.get())
 		temperature = float(temp_var.get())
 		prompt = prompt_text.get("1.0", tk.END).strip()
+		glossary_raw = glossary_text.get("1.0", tk.END).strip()
+		glossary_entries = parse_glossary(glossary_raw)
+		prompt = build_prompt_with_glossary(prompt, glossary_entries)
+		if glossary_entries:
+			add_log(f"📚 Áp dụng glossary: {len(glossary_entries)} mục thuật ngữ.")
 
 		with open(in_file, "r", encoding="utf-8") as f:
 			chunks = split_text(f.read(), size=chunk_size)
@@ -1530,11 +1590,11 @@ def toggle_api_key_visibility():
 		btn_toggle_api.config(text='🙈 Ẩn')
 	else:
 		api_key_entry.config(show='*')
-		btn_toggle_api.config(text='👁️ Hiện')
+		btn_toggle_api.config(text='Hiện')
 
 btn_toggle_api = tk.Button(
 	api_key_frame,
-	text="👁️ Hiện",
+	text="Hiện",
 	font=("Segoe UI", 9, "bold"),
 	bg=PALETTE["accent_alt"],
 	fg="#0b0f19",
@@ -1634,7 +1694,7 @@ max_output_tokens_box.grid(row=1, column=2, sticky="ew", padx=(6, 0), pady=(2, 0
 
 tk.Label(
 	card_config,
-	text="Nhiệt độ (0-1)",
+	text="Nhiệt độ (0-2)",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
@@ -1642,7 +1702,7 @@ tk.Label(
 temp_scale = ttk.Scale(
 	card_config,
 	from_=0.0,
-	to=1.0,
+	to=2.0,
 	variable=temp_var,
 	orient="horizontal",
 	length=200,
@@ -1667,6 +1727,37 @@ temp_scale.bind("<Motion>", update_temp_label)
 temp_scale.bind("<ButtonRelease-1>", update_temp_label)
 
 card_prompt = build_card(translate_tab, "📝 Prompt dịch giả", 0, 3, colspan=2)
+
+tk.Label(
+	card_prompt,
+	text="Glossary/Từ điển thuật ngữ (mỗi dòng: nguồn => đích)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=1, column=0, sticky="w", pady=(0, 4))
+
+glossary_text = tk.Text(
+	card_prompt,
+	height=4,
+	bg=PALETTE["input_bg"],
+	fg=PALETTE["text"],
+	insertbackground=PALETTE["accent"],
+	wrap="word",
+	relief="flat",
+	highlightthickness=1,
+	highlightbackground=PALETTE["border"],
+)
+glossary_text.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
+glossary_text.insert(tk.END, DEFAULT_GLOSSARY)
+
+tk.Label(
+	card_prompt,
+	text="Prompt dịch giả",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=3, column=0, sticky="w", pady=(0, 4))
+
 prompt_text = tk.Text(
 	card_prompt,
 	height=5,
@@ -1678,9 +1769,10 @@ prompt_text = tk.Text(
 	highlightthickness=1,
 	highlightbackground=PALETTE["border"],
 )
-prompt_text.grid(row=1, column=0, sticky="nsew", pady=(4, 6))
+prompt_text.grid(row=4, column=0, sticky="nsew", pady=(0, 6))
 prompt_text.insert(tk.END, DEFAULT_PROMPT)
-card_prompt.rowconfigure(1, weight=1)
+card_prompt.rowconfigure(2, weight=1)
+card_prompt.rowconfigure(4, weight=1)
 
 card_stats = build_card(translate_tab, "📊 Thống kê", 0, 4)
 stats_time_var = tk.StringVar(value="⏱️ Đã chạy: --:--")
