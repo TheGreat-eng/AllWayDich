@@ -28,6 +28,7 @@ MODELS = [
 
 CHUNK_SIZE = 3000
 MAX_OUTPUT_TOKENS = 8192
+DEFAULT_SCAN_CHAR_LIMIT = 10000
 
 DEFAULT_PROMPT = (
 	"Bạn là một biên tập viên truyện dịch chuyên nghiệp, thành thạo tiếng Trung và tiếng Việt.\n"
@@ -181,6 +182,7 @@ def load_settings():
 		"threads": "3",
 		"chunk_size": str(CHUNK_SIZE),
 		"max_output_tokens": str(MAX_OUTPUT_TOKENS),
+		"scan_char_limit": str(DEFAULT_SCAN_CHAR_LIMIT),
 		"temperature": "0.5",
 		"prompt": DEFAULT_PROMPT,
 		"glossary": DEFAULT_GLOSSARY,
@@ -214,6 +216,7 @@ def save_settings():
 		"threads": thread_var.get(),
 		"chunk_size": chunk_size_var.get(),
 		"max_output_tokens": max_output_tokens_var.get(),
+		"scan_char_limit": scan_char_limit_var.get(),
 		"temperature": temp_var.get(),
 		"glossary": glossary_text.get("1.0", tk.END).strip(),
 		"prompt": prompt_text.get("1.0", tk.END).strip(),
@@ -238,6 +241,7 @@ def apply_settings(settings):
 	thread_var.set(settings.get("threads", "3"))
 	chunk_size_var.set(settings.get("chunk_size", str(CHUNK_SIZE)))
 	max_output_tokens_var.set(settings.get("max_output_tokens", str(MAX_OUTPUT_TOKENS)))
+	scan_char_limit_var.set(settings.get("scan_char_limit", str(DEFAULT_SCAN_CHAR_LIMIT)))
 	temp_var.set(settings.get("temperature", "0.5"))
 
 	glossary_text.delete("1.0", tk.END)
@@ -271,11 +275,22 @@ def add_log(message):
 	timestamp = time.strftime("%H:%M:%S")
 	log_message = f"[{timestamp}] {message}\n"
 
-	if "log_box" in globals():
-		log_box.config(state="normal")
-		log_box.insert(tk.END, log_message)
-		log_box.see(tk.END)
-		log_box.config(state="disabled")
+	def _append_to_log_box():
+		if "log_box" in globals() and log_box.winfo_exists():
+			log_box.config(state="normal")
+			log_box.insert(tk.END, log_message)
+			log_box.see(tk.END)
+			log_box.config(state="disabled")
+
+	# Tkinter không thread-safe: mọi thao tác UI phải chạy ở main thread.
+	if threading.current_thread() is threading.main_thread():
+		_append_to_log_box()
+	else:
+		try:
+			if "root" in globals() and root.winfo_exists():
+				root.after(0, _append_to_log_box)
+		except Exception:
+			pass
 
 	print(log_message.strip())
 
@@ -700,6 +715,14 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 				return _safe_int(value)
 		return 0
 
+	def _safe_str(value):
+		if value is None:
+			return ""
+		try:
+			return str(value)
+		except Exception:
+			return ""
+
 	model = genai.GenerativeModel(model_name=model_id)
 	full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
 	response = model.generate_content(
@@ -728,8 +751,15 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 	input_tokens = _usage_get(usage_data, ["prompt_token_count", "input_token_count"])
 	output_tokens = _usage_get(usage_data, ["candidates_token_count", "output_token_count"])
 
-	if hasattr(response, "text") and response.text:
-		return response.text.strip(), input_tokens, output_tokens
+	# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
+	response_text = ""
+	try:
+		response_text = _safe_str(getattr(response, "text", "")).strip()
+	except Exception:
+		response_text = ""
+
+	if response_text:
+		return response_text, input_tokens, output_tokens
 
 	candidates = getattr(response, "candidates", None) or []
 	for candidate in candidates:
@@ -739,7 +769,23 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		if texts:
 			return "\n".join(texts).strip(), input_tokens, output_tokens
 
-	return "", input_tokens, output_tokens
+	prompt_feedback = getattr(response, "prompt_feedback", None)
+	block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
+	block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
+	finish_reason = ""
+	if candidates:
+		finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
+
+	meta = []
+	meta.append(f"candidates={len(candidates)}")
+	if finish_reason:
+		meta.append(f"finish_reason={finish_reason}")
+	if block_reason:
+		meta.append(f"block_reason={block_reason}")
+	if block_message:
+		meta.append(f"block_message={block_message}")
+
+	raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
 
 
 # ================= DỊCH 1 CHUNK =================
@@ -870,45 +916,161 @@ def validate_inputs():
 
 	return True
 
+
+def normalize_scanned_glossary(raw_text):
+	"""Chuẩn hóa output quét thuật ngữ về format 'nguồn => đích'."""
+	if not raw_text:
+		return ""
+
+	cleaned_lines = []
+	seen = set()
+	for line in raw_text.splitlines():
+		clean = line.strip().lstrip("-•* ").strip()
+		if not clean:
+			continue
+
+		separator = None
+		for candidate in ["=>", "->", "→", ":", "="]:
+			if candidate in clean:
+				separator = candidate
+				break
+
+		if not separator:
+			continue
+
+		source, target = clean.split(separator, 1)
+		source = source.strip(" \t\"'“”‘’[](){}")
+		target = target.strip(" \t\"'“”‘’[](){}")
+		if not source or not target:
+			continue
+
+		normalized = f"{source} => {target}"
+		key = normalized.lower()
+		if key in seen:
+			continue
+		seen.add(key)
+		cleaned_lines.append(normalized)
+
+	return "\n".join(cleaned_lines)
+
+
+def get_scan_char_limit():
+	try:
+		scan_char_limit = int(scan_char_limit_var.get())
+		if scan_char_limit < 500 or scan_char_limit > 200000:
+			raise ValueError
+		return scan_char_limit
+	except Exception:
+		messagebox.showerror("Lỗi", "Giới hạn ký tự quét phải là số nguyên từ 500 đến 200000.")
+		return None
+
+
+def build_scan_segments(text, segment_size=12000, max_segments=12):
+	"""Tạo các đoạn quét glossary từ văn bản, phân bố đều để tăng độ phủ."""
+	if not text:
+		return []
+
+	segments = []
+	paragraphs = text.split("\n\n")
+	bucket = ""
+
+	for para in paragraphs:
+		part = para if para == paragraphs[-1] else para + "\n\n"
+		if len(bucket) + len(part) > segment_size and bucket.strip():
+			segments.append(bucket)
+			bucket = part
+		else:
+			bucket += part
+
+	if bucket.strip():
+		segments.append(bucket)
+
+	if not segments:
+		segments = [text[:segment_size]]
+
+	if len(segments) <= max_segments:
+		return segments
+
+	# Lấy mẫu đều trên toàn bộ truyện thay vì chỉ phần đầu.
+	selected = []
+	selected_positions = set()
+	for i in range(max_segments):
+		pos = int(round(i * (len(segments) - 1) / (max_segments - 1))) if max_segments > 1 else 0
+		if pos not in selected_positions:
+			selected_positions.add(pos)
+			selected.append(segments[pos])
+
+	return selected
+
 def scan_story():
 	if not validate_inputs():
+		return
+
+	scan_char_limit = get_scan_char_limit()
+	if scan_char_limit is None:
 		return
 	
 	api_key = api_key_entry.get().strip()
 	genai.configure(api_key=api_key)
+	in_file = input_path.get()
+	chunk_size = int(chunk_size_var.get())
+	model_id = model_var.get()
+	temperature = float(temp_var.get())
 	
 	def run_scan():
 		try:
-			add_log("🔍 Đang quét thuật ngữ (dự kiến mất vài giây)...")
-			in_file = input_path.get()
-			chunk_size = int(chunk_size_var.get())
-			model_id = model_var.get()
-			temperature = float(temp_var.get())
+			add_log(f"🔍 Đang quét thuật ngữ (tối đa {scan_char_limit:,} ký tự, có thể mất 10-60 giây)...")
 			
 			with open(in_file, "r", encoding="utf-8") as f:
-				chunks = split_text(f.read(), size=chunk_size)
-			
-			scan_chunks = chunks[:3]
-			text_to_scan = "\n\n".join(scan_chunks)
-			if len(text_to_scan) > 10000:
-				text_to_scan = text_to_scan[:10000]
-				
+				full_text = f.read()
+
+			limited_text = full_text[:scan_char_limit]
+			scan_segments = build_scan_segments(limited_text, segment_size=12000, max_segments=12)
+			add_log(f"🧩 Quét {len(scan_segments)} đoạn mẫu để tăng độ phủ thuật ngữ.")
+
 			scan_prompt = (
-				"Bạn là một chuyên gia ngôn ngữ và biên tập viên truyện. Hãy đọc đoạn văn bản sau đây và trích xuất "
-				"tất cả các danh từ riêng, tên nhân vật, địa danh, tên môn phái, chiêu thức, bảo bối, cấp bậc tu luyện...\n"
-				"Trình bày kết quả dưới dạng danh sách, mỗi từ một dòng cấu trúc:\n"
-				"Từ gốc tiếng Trung => Từ dịch tiếng Việt\n"
+				"Bạn là chuyên gia biên tập truyện Trung-Việt.\n"
+				"Hãy trích xuất danh sách thuật ngữ quan trọng trong đoạn sau, ưu tiên:\n"
+				"- Tên nhân vật, biệt danh, tôn xưng\n"
+				"- Địa danh, tông môn, thế lực\n"
+				"- Công pháp, chiêu thức, cảnh giới, bảo vật\n"
+				"- Danh xưng nhất quán nên giữ nguyên toàn truyện\n\n"
+				"ĐỊNH DẠNG BẮT BUỘC: mỗi dòng một mục theo mẫu: Nguồn => Đích\n"
 				"Ví dụ:\n"
 				"张三 => Trương Tam\n"
-				"青云门 => Thanh Vân Môn\n"
-				"Tuyệt đối KHÔNG xuất thêm giải thích, KHÔNG lặp lại từ, CHỈ in ra danh sách thuật ngữ.\n"
-				"Nếu không tìm thấy, trả về chữ 'Không có'."
+				"青云门 => Thanh Vân Môn\n\n"
+				"YÊU CẦU:\n"
+				"- Không giải thích, không đánh số, không thêm tiêu đề\n"
+				"- Không lặp mục đã có\n"
+				"- Nếu không có thuật ngữ thì trả đúng một dòng: Không có"
 			)
-			
-			result = translate_with_gemini(model_id, scan_prompt, text_to_scan, temperature, 2048)
-			if result and "Không có" not in result and "=>" in result:
-				extracted_terms = result.strip()
-				add_log("✅ Quét xong thuật ngữ!")
+
+			merged_terms = []
+			seen_terms = set()
+
+			for seg_idx, segment in enumerate(scan_segments, 1):
+				add_log(f"🔎 Quét đoạn mẫu {seg_idx}/{len(scan_segments)}...")
+				raw_result, _, _ = translate_with_gemini(model_id, scan_prompt, segment, temperature, 3072)
+				if not raw_result or "không có" in raw_result.lower():
+					continue
+
+				normalized = normalize_scanned_glossary(raw_result)
+				if not normalized:
+					continue
+
+				for term_line in normalized.splitlines():
+					term_key = term_line.strip().lower()
+					if not term_key or term_key in seen_terms:
+						continue
+					seen_terms.add(term_key)
+					merged_terms.append(term_line.strip())
+
+				time.sleep(0.35)
+
+			extracted_terms = "\n".join(merged_terms)
+
+			if extracted_terms:
+				add_log(f"✅ Quét xong thuật ngữ! Tìm thấy {len(merged_terms)} mục.")
 				
 				def ask_user():
 					if messagebox.askyesno("Kết quả quét thuật ngữ", f"Đã tìm thấy các thuật ngữ:\n\n{extracted_terms}\n\nBạn có muốn thêm vào Glossary không?"):
@@ -1619,6 +1781,7 @@ model_var = tk.StringVar(value=MODELS[0])
 thread_var = tk.StringVar(value="3")
 chunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))
 max_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))
+scan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))
 temp_var = tk.StringVar(value="0.5")
 
 entry_opts = {
@@ -1802,8 +1965,22 @@ tk.Label(
 	font=("Segoe UI", 9, "bold"),
 ).pack(side="left")
 
+scan_limit_frame = tk.Frame(glossary_header_frame, bg=PALETTE["panel"])
+scan_limit_frame.pack(side="right")
+
+tk.Label(
+	scan_limit_frame,
+	text="Giới hạn ký tự quét:",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 8, "bold"),
+).pack(side="left", padx=(0, 4))
+
+scan_limit_entry = tk.Entry(scan_limit_frame, textvariable=scan_char_limit_var, width=8, **entry_opts)
+scan_limit_entry.pack(side="left", padx=(0, 8))
+
 tk.Button(
-	glossary_header_frame,
+	scan_limit_frame,
 	text="🔍 Quét thuật ngữ",
 	font=("Segoe UI", 8, "bold"),
 	bg=PALETTE["accent_alt"],

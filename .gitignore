@@ -47,13 +47,11 @@ tempt/
 # Project-specific sensitive files
 # =========================
 # App settings may contain API keys / credentials
-AWSDichTruyen/app_settings.json
-GoogleDichTruyen/app_settings.json
+**/app_settings*.json
 
-# Translation history data (often large / local only)
-AWSDichTruyen/translation_history.json
-GoogleDichTruyen/translation_history.json
-*.json
+# Translation history data and other local runtime JSON files
+**/translation_history*.json
+**/*.resume.json
 
 # Common secret files
 .env
