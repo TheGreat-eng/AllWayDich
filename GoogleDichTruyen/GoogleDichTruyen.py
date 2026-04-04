@@ -1029,20 +1029,19 @@ def scan_story():
 			add_log(f"🧩 Quét {len(scan_segments)} đoạn mẫu để tăng độ phủ thuật ngữ.")
 
 			scan_prompt = (
-				"Bạn là chuyên gia biên tập truyện Trung-Việt.\n"
-				"Hãy trích xuất danh sách thuật ngữ quan trọng trong đoạn sau, ưu tiên:\n"
-				"- Tên nhân vật, biệt danh, tôn xưng\n"
-				"- Địa danh, tông môn, thế lực\n"
-				"- Công pháp, chiêu thức, cảnh giới, bảo vật\n"
-				"- Danh xưng nhất quán nên giữ nguyên toàn truyện\n\n"
-				"ĐỊNH DẠNG BẮT BUỘC: mỗi dòng một mục theo mẫu: Nguồn => Đích\n"
-				"Ví dụ:\n"
-				"张三 => Trương Tam\n"
-				"青云门 => Thanh Vân Môn\n\n"
+				"Bạn là chuyên gia biên tập truyện dịch từ Trung sang Việt.\n"
+				"Hãy trích xuất danh sách thuật ngữ quan trọng từ đoạn sau, ưu tiên:\n\n"
+				"1. TỪ HÁN VIỆT CẦN CHUYỂN SANG THUẦN VIỆT (định dạng: từ_hán_việt => từ_thuần_việt):\n"
+				"   VD: phát_hiện => tìm_thấy, cao_hứng => vui_vẻ, chuẩn_bị => sắp_sửa\n\n"
+				"2. TÊN RIÊNG - TÊN NHÂN VẬT, ĐỊA DANH (định dạng: tên_gốc => tên_đã_dịch):\n"
+				"   VD: 张三 => Trương Tam, 青云门 => Thanh Vân Môn\n\n"
+				"3. CÁCH HÔ / XƯNG HÔ GIỮA NHÂN VẬT (định dạng: cách_hô_gốc => cách_hô_việt):\n"
+				"   VD: 师兄 => sư huynh, 宝贝 => bảo bối, 主人 => chủ nhân\n\n"
+				"ĐỊNH DẠNG BẮT BUỘC: mỗi dòng một mục theo mẫu: Nguồn => Đích\n\n"
 				"YÊU CẦU:\n"
 				"- Không giải thích, không đánh số, không thêm tiêu đề\n"
 				"- Không lặp mục đã có\n"
-				"- Nếu không có thuật ngữ thì trả đúng một dòng: Không có"
+				"- Nếu không có thuật ngữ thì trả: Không có"
 			)
 
 			merged_terms = []
@@ -1093,6 +1092,7 @@ def scan_story():
 			root.after(0, lambda: messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {e}"))
 			
 	threading.Thread(target=run_scan, daemon=True).start()
+
 
 
 # ================= 1. PHƯƠNG THỨC KÍCH HOẠT (START) =================
