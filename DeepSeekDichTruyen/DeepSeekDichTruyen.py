@@ -10,23 +10,19 @@ import random
 import base64
 import hashlib
 import re
-
-try:
-	import google.generativeai as genai
-except ImportError:
-	genai = None
+import urllib.request
+import urllib.error
 
 
-# ================= CẤU HÌNH GEMINI =================
+# ================= CẤU HÌNH DEEPSEEK =================
 MODELS = [
-	"gemini-3-flash-preview",
-	"gemini-3.1-pro-preview",
-	"gemini-2.5-flash",
-	"gemini-2.5-flash-lite",
-	"gemini-3.1-flash-lite-preview",
-	"gemma-4-26b-a4b-it",
-	"gemma-4-31b-it"
+	"deepseek-v4-flash",
+	"deepseek-v4-pro",
+	"deepseek-chat",
+	"deepseek-reasoner",
 ]
+
+DEEPSEEK_API_BASE = "https://api.deepseek.com"
 
 CHUNK_SIZE = 3000
 MAX_OUTPUT_TOKENS = 8192
@@ -70,28 +66,45 @@ stats = {
 
 
 MODEL_PRICING = {
-	"gemini-3.1-pro-preview": {
-		"input_per_1m_le_200k": 2.00,
-		"input_per_1m_gt_200k": 4.00,
-		"output_per_1m_le_200k": 12.00,
-		"output_per_1m_gt_200k": 18.00,
+	# Theo docs DeepSeek (Models & Pricing) tại thời điểm 2026-04-24.
+	# Input cache-hit/cache-miss được tách riêng. Nếu API không trả cache tokens,
+	# app sẽ coi toàn bộ input là cache-miss để ước tính an toàn.
+	"deepseek-v4-flash": {
+		"input_cache_hit_per_1m": 0.028,
+		"input_cache_miss_per_1m": 0.14,
+		"output_per_1m": 0.28,
 	},
-	"gemini-3.1-flash-lite-preview": {"input_per_1m": 0.25, "output_per_1m": 1.50},
-	"gemini-3-flash-preview": {"input_per_1m": 0.50, "output_per_1m": 3.00},
-	"gemini-2.5-flash": {"input_per_1m": 0.30, "output_per_1m": 2.50},
-	"gemini-2.5-flash-lite": {"input_per_1m": 0.10, "output_per_1m": 0.40},
+	"deepseek-v4-pro": {
+		"input_cache_hit_per_1m": 0.145,
+		"input_cache_miss_per_1m": 1.74,
+		"output_per_1m": 3.48,
+	},
+	# Legacy aliases (dự kiến deprecate, giữ để tương thích).
+	"deepseek-chat": {
+		"input_cache_hit_per_1m": 0.028,
+		"input_cache_miss_per_1m": 0.14,
+		"output_per_1m": 0.28,
+	},
+	"deepseek-reasoner": {
+		"input_cache_hit_per_1m": 0.028,
+		"input_cache_miss_per_1m": 0.14,
+		"output_per_1m": 0.28,
+	},
 }
 
 USD_TO_VND = 27000
 
 
-def get_model_prices_usd_per_1m(model_id, input_tokens):
-	pricing = MODEL_PRICING.get(model_id, {"input_per_1m": 0.0, "output_per_1m": 0.0})
-	if model_id == "gemini-3.1-pro-preview":
-		if input_tokens <= 200_000:
-			return pricing["input_per_1m_le_200k"], pricing["output_per_1m_le_200k"]
-		return pricing["input_per_1m_gt_200k"], pricing["output_per_1m_gt_200k"]
-	return pricing.get("input_per_1m", 0.0), pricing.get("output_per_1m", 0.0)
+def get_model_prices_usd_per_1m(model_id):
+	pricing = MODEL_PRICING.get(model_id, {})
+	if pricing:
+		return pricing
+	# Fallback mềm: model mới chưa map giá thì dùng mặt bằng flash.
+	return {
+		"input_cache_hit_per_1m": 0.028,
+		"input_cache_miss_per_1m": 0.14,
+		"output_per_1m": 0.28,
+	}
 
 
 # ================= CHẾ ĐỘ SÁNG/TỐI =================
@@ -136,7 +149,7 @@ def get_machine_key():
 	unique_string = (
 		os.environ.get("COMPUTERNAME", "PC")
 		+ os.environ.get("USERNAME", "User")
-		+ "GoogleDichTruyenSecretKey2026"
+		+ "DeepSeekDichTruyenSecretKey2026"
 	)
 	return hashlib.sha256(unique_string.encode()).digest()
 
@@ -703,91 +716,89 @@ def split_text(text, size=CHUNK_SIZE):
 	return chunks
 
 
-def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):
-	def _safe_int(value):
-		try:
-			return int(value)
-		except Exception:
-			return 0
-
-	def _usage_get(usage_obj, keys):
-		for key in keys:
-			value = usage_obj.get(key)
-			if value is not None:
-				return _safe_int(value)
+def _safe_int(value):
+	try:
+		return int(value)
+	except Exception:
 		return 0
 
-	def _safe_str(value):
-		if value is None:
-			return ""
-		try:
-			return str(value)
-		except Exception:
-			return ""
 
-	model = genai.GenerativeModel(model_name=model_id)
+def _usage_get(usage_obj, keys):
+	for key in keys:
+		value = usage_obj.get(key)
+		if value is not None:
+			return _safe_int(value)
+	return 0
+
+
+def _safe_str(value):
+	if value is None:
+		return ""
+	try:
+		return str(value)
+	except Exception:
+		return ""
+
+
+def translate_with_deepseek(model_id, prompt, chunk, temperature, max_output_tokens):
+	api_key = api_key_entry.get().strip()
 	full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
-	response = model.generate_content(
-		full_prompt,
-		generation_config=genai.types.GenerationConfig(
-			temperature=temperature,
-			max_output_tokens=max_output_tokens,
-		),
+	payload = {
+		"model": model_id,
+		"messages": [
+			{"role": "system", "content": "Bạn là một biên tập viên truyện dịch chuyên nghiệp."},
+			{"role": "user", "content": full_prompt},
+		],
+		"max_tokens": max_output_tokens,
+		"temperature": temperature,
+		"stream": False,
+	}
+
+	req = urllib.request.Request(
+		url=f"{DEEPSEEK_API_BASE}/chat/completions",
+		data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+		headers={
+			"Content-Type": "application/json",
+			"Authorization": f"Bearer {api_key}",
+		},
+		method="POST",
 	)
 
-	usage = getattr(response, "usage_metadata", None)
-	if usage is None:
-		usage_data = {}
-	elif isinstance(usage, dict):
-		usage_data = usage
-	elif hasattr(usage, "to_dict"):
-		usage_data = usage.to_dict()
-	else:
-		usage_data = {
-			"prompt_token_count": getattr(usage, "prompt_token_count", None),
-			"candidates_token_count": getattr(usage, "candidates_token_count", None),
-			"input_token_count": getattr(usage, "input_token_count", None),
-			"output_token_count": getattr(usage, "output_token_count", None),
-		}
-
-	input_tokens = _usage_get(usage_data, ["prompt_token_count", "input_token_count"])
-	output_tokens = _usage_get(usage_data, ["candidates_token_count", "output_token_count"])
-
-	# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
-	response_text = ""
 	try:
-		response_text = _safe_str(getattr(response, "text", "")).strip()
-	except Exception:
-		response_text = ""
+		with urllib.request.urlopen(req, timeout=180) as resp:
+			raw_data = resp.read().decode("utf-8")
+			response_data = json.loads(raw_data)
+	except urllib.error.HTTPError as e:
+		err_body = ""
+		try:
+			err_body = e.read().decode("utf-8", errors="ignore")
+		except Exception:
+			pass
+		raise RuntimeError(f"HTTP {e.code}: {err_body[:300]}")
+	except Exception as e:
+		raise RuntimeError(f"Lỗi kết nối DeepSeek: {e}")
+
+	usage_data = response_data.get("usage", {}) or {}
+	input_tokens = _usage_get(usage_data, ["prompt_tokens", "input_tokens"])
+	output_tokens = _usage_get(usage_data, ["completion_tokens", "output_tokens"])
+	cache_hit_tokens = _usage_get(usage_data, ["prompt_cache_hit_tokens", "cache_hit_tokens"])
+	cache_miss_tokens = _usage_get(usage_data, ["prompt_cache_miss_tokens", "cache_miss_tokens"])
+
+	choices = response_data.get("choices", []) or []
+	message = choices[0].get("message", {}) if choices else {}
+	response_text = _safe_str(message.get("content", "")).strip()
 
 	if response_text:
-		return response_text, input_tokens, output_tokens
+		return response_text, input_tokens, output_tokens, cache_hit_tokens, cache_miss_tokens
 
-	candidates = getattr(response, "candidates", None) or []
-	for candidate in candidates:
-		content = getattr(candidate, "content", None)
-		parts = getattr(content, "parts", None) or []
-		texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
-		if texts:
-			return "\n".join(texts).strip(), input_tokens, output_tokens
-
-	prompt_feedback = getattr(response, "prompt_feedback", None)
-	block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
-	block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
-	finish_reason = ""
-	if candidates:
-		finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
+	finish_reason = choices[0].get("finish_reason", "") if choices else ""
 
 	meta = []
-	meta.append(f"candidates={len(candidates)}")
+	meta.append(f"choices={len(choices)}")
 	if finish_reason:
 		meta.append(f"finish_reason={finish_reason}")
-	if block_reason:
-		meta.append(f"block_reason={block_reason}")
-	if block_message:
-		meta.append(f"block_message={block_message}")
 
-	raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
+	raise RuntimeError("DeepSeek không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
 
 
 # ================= DỊCH 1 CHUNK =================
@@ -807,13 +818,19 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 
 		try:
 			add_log(f"⏳ Đang dịch đoạn {index + 1}... (lần thử {attempt + 1}/{retries})")
-			translated_text, input_tokens, output_tokens = translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens)
-			input_price_per_1m, output_price_per_1m = get_model_prices_usd_per_1m(model_id, input_tokens)
-			input_cost = (input_tokens / 1_000_000) * input_price_per_1m
-			output_cost = (output_tokens / 1_000_000) * output_price_per_1m
+			translated_text, input_tokens, output_tokens, cache_hit_tokens, cache_miss_tokens = translate_with_deepseek(model_id, prompt, chunk, temperature, max_output_tokens)
+			pricing = get_model_prices_usd_per_1m(model_id)
+			if cache_hit_tokens + cache_miss_tokens == 0:
+				cache_miss_tokens = input_tokens
+
+			input_cost = (
+				(cache_hit_tokens / 1_000_000) * pricing.get("input_cache_hit_per_1m", 0.0)
+				+ (cache_miss_tokens / 1_000_000) * pricing.get("input_cache_miss_per_1m", 0.0)
+			)
+			output_cost = (output_tokens / 1_000_000) * pricing.get("output_per_1m", 0.0)
 
 			if not translated_text:
-				raise RuntimeError("Gemini trả về nội dung rỗng.")
+				raise RuntimeError("DeepSeek trả về nội dung rỗng.")
 
 			save_checkpoint(cp_file, index, translated_text)
 
@@ -868,16 +885,9 @@ def stop_translation():
 
 
 def validate_inputs():
-	if genai is None:
-		messagebox.showerror(
-			"Thiếu thư viện",
-			"Chưa cài thư viện google-generativeai.\nCài bằng lệnh: pip install google-generativeai",
-		)
-		return False
-
 	api_key = api_key_entry.get().strip()
 	if not api_key:
-		messagebox.showerror("Lỗi", "Vui lòng nhập Gemini API Key.")
+		messagebox.showerror("Lỗi", "Vui lòng nhập DeepSeek API Key.")
 		return False
 
 	if not input_path.get() or not os.path.isfile(input_path.get()):
@@ -917,6 +927,51 @@ def validate_inputs():
 		return False
 
 	return True
+
+
+def refresh_models_from_api():
+	api_key = api_key_entry.get().strip()
+	if not api_key:
+		messagebox.showerror("Lỗi", "Vui lòng nhập DeepSeek API Key trước khi làm mới model.")
+		return
+
+	req = urllib.request.Request(
+		url=f"{DEEPSEEK_API_BASE}/models",
+		headers={"Authorization": f"Bearer {api_key}"},
+		method="GET",
+	)
+
+	try:
+		with urllib.request.urlopen(req, timeout=30) as resp:
+			payload = json.loads(resp.read().decode("utf-8"))
+	except urllib.error.HTTPError as e:
+		err_body = ""
+		try:
+			err_body = e.read().decode("utf-8", errors="ignore")
+		except Exception:
+			pass
+		messagebox.showerror("Lỗi API", f"Không lấy được danh sách model. HTTP {e.code}\n{err_body[:300]}")
+		return
+	except Exception as e:
+		messagebox.showerror("Lỗi", f"Không thể kết nối DeepSeek: {e}")
+		return
+
+	models = []
+	for item in payload.get("data", []) or []:
+		model_id = item.get("id")
+		if model_id:
+			models.append(model_id)
+
+	if not models:
+		messagebox.showwarning("Thông báo", "Không nhận được model nào từ API.")
+		return
+
+	models = sorted(set(models))
+	model_cb["values"] = models
+	current = model_var.get()
+	if current not in models:
+		model_var.set(models[0])
+	add_log(f"🔄 Đã làm mới danh sách model DeepSeek: {len(models)} model.")
 
 
 def normalize_scanned_glossary(raw_text):
@@ -1012,10 +1067,7 @@ def scan_story():
 	if scan_char_limit is None:
 		return
 	
-	api_key = api_key_entry.get().strip()
-	genai.configure(api_key=api_key)
 	in_file = input_path.get()
-	chunk_size = int(chunk_size_var.get())
 	model_id = model_var.get()
 	temperature = float(temp_var.get())
 	
@@ -1051,7 +1103,7 @@ def scan_story():
 
 			for seg_idx, segment in enumerate(scan_segments, 1):
 				add_log(f"🔎 Quét đoạn mẫu {seg_idx}/{len(scan_segments)}...")
-				raw_result, _, _ = translate_with_gemini(model_id, scan_prompt, segment, temperature, 3072)
+				raw_result, _, _, _, _ = translate_with_deepseek(model_id, scan_prompt, segment, temperature, 3072)
 				if not raw_result or "không có" in raw_result.lower():
 					continue
 
@@ -1108,8 +1160,6 @@ def start_translation():
 	is_paused = False
 	pause_event.set()
 
-	api_key = api_key_entry.get().strip()
-	genai.configure(api_key=api_key)
 	output_path.set(build_default_output_path(input_path.get()))
 	add_log(f"📄 File output mặc định: {output_path.get()}")
 
@@ -1123,7 +1173,7 @@ def start_translation():
 	stats_thread.daemon = True
 	stats_thread.start()
 
-	add_log("🚀 Đã kích hoạt luồng dịch thuật ngầm (Gemini)...")
+	add_log("🚀 Đã kích hoạt luồng dịch thuật ngầm (DeepSeek)...")
 
 
 def stats_update_loop():
@@ -1274,7 +1324,7 @@ def process_translation_logic():
 		end_time = time.time()
 		duration_seconds = max(0, int(end_time - stats["start_time"])) if stats["start_time"] else 0
 		history_entry = {
-			"engine": "Google Gemini",
+			"engine": "DeepSeek",
 			"status": history_status,
 			"start_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["start_time"] if stats["start_time"] else end_time)),
 			"end_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_time)),
@@ -1312,7 +1362,7 @@ def process_translation_logic():
 
 # ================= GUI (Giao diện) =================
 root = tk.Tk()
-root.title("📖 App Dịch Truyện – Powered by Google Gemini")
+root.title("📖 App Dịch Truyện – Powered by DeepSeek")
 root.geometry("1100x950")
 root.minsize(800, 600)
 
@@ -1430,7 +1480,7 @@ header_top.pack(fill="x")
 header_title_frame = tk.Frame(header_top, bg=PALETTE["bg"])
 header_title_frame.pack(side="left", fill="both", expand=True)
 
-ttk.Label(header_title_frame, text="App Dịch Truyện – Google Gemini", style="Header.TLabel").pack(anchor="w")
+ttk.Label(header_title_frame, text="App Dịch Truyện – DeepSeek", style="Header.TLabel").pack(anchor="w")
 ttk.Label(
 	header_title_frame,
 	text="Trải nghiệm dịch mượt, rõ ràng và có thể resume bất cứ lúc nào.",
@@ -1454,8 +1504,8 @@ btn_theme.pack(side="right", padx=(10, 0))
 badge_row = tk.Frame(header, bg=PALETTE["bg"])
 badge_row.pack(anchor="w", pady=(4, 0))
 for text, color in [
-	("Google Gemini API", PALETTE["accent"]),
-	("Flash + Pro Models", PALETTE["accent_alt"]),
+	("DeepSeek API", PALETTE["accent"]),
+	("V4 Flash + V4 Pro", PALETTE["accent_alt"]),
 ]:
 	tk.Label(
 		badge_row,
@@ -1795,10 +1845,10 @@ entry_opts = {
 	"highlightbackground": PALETTE["border"],
 }
 
-card_api = build_card(translate_tab, "🔐 Gemini API Key", 0, 1, colspan=2)
+card_api = build_card(translate_tab, "🔐 DeepSeek API Key", 0, 1, colspan=2)
 tk.Label(
 	card_api,
-	text="Dùng Gemini API Key từ Google AI Studio. Key được mã hóa và chỉ dùng trên máy này.",
+	text="Dùng DeepSeek API Key. Key được mã hóa và chỉ dùng trên máy này.",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9),
@@ -1834,7 +1884,7 @@ btn_toggle_api.grid(row=0, column=1, padx=(6, 0))
 
 tk.Label(
 	card_api,
-	text="Lấy key tại: Google AI Studio › API Keys.",
+	text="Lấy key tại: https://platform.deepseek.com/api_keys",
 	bg=PALETTE["panel"],
 	fg=PALETTE["accent_alt"],
 	font=("Segoe UI", 9, "bold"),
@@ -1883,6 +1933,17 @@ tk.Label(
 ).grid(row=1, column=0, sticky="w")
 model_cb = ttk.Combobox(card_config, values=MODELS, textvariable=model_var, state="readonly")
 model_cb.grid(row=2, column=0, sticky="ew", pady=(2, 8))
+tk.Button(
+	card_config,
+	text="🔄 Làm mới model từ API",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=4,
+	command=refresh_models_from_api,
+).grid(row=2, column=1, sticky="e", padx=(8, 0))
 
 perf_frame = tk.Frame(card_config, bg=PALETTE["panel"])
 perf_frame.grid(row=3, column=0, sticky="ew", pady=(2, 8))
@@ -2268,8 +2329,7 @@ root.protocol("WM_DELETE_WINDOW", on_closing)
 
 add_log("📂 Đã tải cài đặt từ lần sử dụng trước.")
 add_log("🔐 API Key được mã hóa khi lưu, chỉ hoạt động trên máy này.")
-if genai is None:
-	add_log("⚠️ Thiếu thư viện google-generativeai. Cài bằng: pip install google-generativeai")
+add_log("🌐 Sử dụng DeepSeek API chuẩn OpenAI-compatible qua endpoint /chat/completions.")
 refresh_history_display()
 try:
 	refresh_cost_stats()

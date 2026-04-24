@@ -10,7 +10,6 @@ import random
 import base64
 import hashlib
 import re
-from collections import deque
 
 try:
 	import google.generativeai as genai
@@ -25,17 +24,13 @@ MODELS = [
 	"gemini-2.5-flash",
 	"gemini-2.5-flash-lite",
 	"gemini-3.1-flash-lite-preview",
+	"gemma-4-26b-a4b-it",
+	"gemma-4-31b-it"
 ]
 
 CHUNK_SIZE = 3000
 MAX_OUTPUT_TOKENS = 8192
-DEFAULT_MODEL_RATE_LIMITS_PER_MIN = {
-	"gemini-3-flash-preview": 10,
-	"gemini-3.1-pro-preview": 5,
-	"gemini-2.5-flash": 10,
-	"gemini-2.5-flash-lite": 15,
-	"gemini-3.1-flash-lite-preview": 15,
-}
+DEFAULT_SCAN_CHAR_LIMIT = 10000
 
 DEFAULT_PROMPT = (
 	"Bạn là một biên tập viên truyện dịch chuyên nghiệp, thành thạo tiếng Trung và tiếng Việt.\n"
@@ -97,54 +92,6 @@ def get_model_prices_usd_per_1m(model_id, input_tokens):
 			return pricing["input_per_1m_le_200k"], pricing["output_per_1m_le_200k"]
 		return pricing["input_per_1m_gt_200k"], pricing["output_per_1m_gt_200k"]
 	return pricing.get("input_per_1m", 0.0), pricing.get("output_per_1m", 0.0)
-
-
-class PerModelRateLimiter:
-	def __init__(self, limits_per_min=None):
-		self._lock = threading.Lock()
-		self._limits_per_min = {}
-		self._request_timestamps = {}
-		self.set_limits(limits_per_min or DEFAULT_MODEL_RATE_LIMITS_PER_MIN)
-
-	def set_limits(self, limits_per_min):
-		normalized = {}
-		for model in MODELS:
-			raw = limits_per_min.get(model, DEFAULT_MODEL_RATE_LIMITS_PER_MIN.get(model, 10))
-			try:
-				value = int(raw)
-			except Exception:
-				value = DEFAULT_MODEL_RATE_LIMITS_PER_MIN.get(model, 10)
-			normalized[model] = max(1, min(1200, value))
-
-		with self._lock:
-			self._limits_per_min = normalized
-			for model in MODELS:
-				self._request_timestamps.setdefault(model, deque())
-
-	def get_limit(self, model_id):
-		with self._lock:
-			return self._limits_per_min.get(model_id, 1)
-
-	def wait_for_slot(self, model_id):
-		wait_started = time.time()
-		while True:
-			if is_stopped:
-				return None
-
-			now = time.time()
-			with self._lock:
-				limit = self._limits_per_min.get(model_id, 1)
-				timestamps = self._request_timestamps.setdefault(model_id, deque())
-				while timestamps and now - timestamps[0] >= 60:
-					timestamps.popleft()
-
-				if len(timestamps) < limit:
-					timestamps.append(now)
-					return max(0.0, now - wait_started)
-
-				wait_seconds = 60 - (now - timestamps[0])
-
-			time.sleep(max(0.05, min(wait_seconds, 1.0)))
 
 
 # ================= CHẾ ĐỘ SÁNG/TỐI =================
@@ -224,8 +171,8 @@ def decrypt_api_key(encrypted_key: str) -> str:
 
 
 # ================= CẤU HÌNH LƯU TRỮ CÀI ĐẶT =================
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings_rate_limit.json")
-HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_history_rate_limit.json")
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings.json")
+HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_history.json")
 
 
 def load_settings():
@@ -237,10 +184,10 @@ def load_settings():
 		"threads": "3",
 		"chunk_size": str(CHUNK_SIZE),
 		"max_output_tokens": str(MAX_OUTPUT_TOKENS),
+		"scan_char_limit": str(DEFAULT_SCAN_CHAR_LIMIT),
 		"temperature": "0.5",
 		"prompt": DEFAULT_PROMPT,
 		"glossary": DEFAULT_GLOSSARY,
-		"model_rate_limits": DEFAULT_MODEL_RATE_LIMITS_PER_MIN.copy(),
 		"theme": "dark",
 	}
 
@@ -260,22 +207,6 @@ def load_settings():
 	return default_settings
 
 
-def get_model_rate_limits_from_ui():
-	if "model_rate_limit_vars" not in globals():
-		return DEFAULT_MODEL_RATE_LIMITS_PER_MIN.copy()
-
-	rate_limits = {}
-	for model in MODELS:
-		raw = model_rate_limit_vars[model].get().strip()
-		try:
-			value = int(raw)
-		except Exception:
-			value = DEFAULT_MODEL_RATE_LIMITS_PER_MIN.get(model, 10)
-		rate_limits[model] = max(1, min(1200, value))
-
-	return rate_limits
-
-
 def save_settings():
 	api_key = api_key_entry.get().strip()
 
@@ -287,8 +218,8 @@ def save_settings():
 		"threads": thread_var.get(),
 		"chunk_size": chunk_size_var.get(),
 		"max_output_tokens": max_output_tokens_var.get(),
+		"scan_char_limit": scan_char_limit_var.get(),
 		"temperature": temp_var.get(),
-		"model_rate_limits": get_model_rate_limits_from_ui(),
 		"glossary": glossary_text.get("1.0", tk.END).strip(),
 		"prompt": prompt_text.get("1.0", tk.END).strip(),
 		"theme": current_theme,
@@ -312,6 +243,7 @@ def apply_settings(settings):
 	thread_var.set(settings.get("threads", "3"))
 	chunk_size_var.set(settings.get("chunk_size", str(CHUNK_SIZE)))
 	max_output_tokens_var.set(settings.get("max_output_tokens", str(MAX_OUTPUT_TOKENS)))
+	scan_char_limit_var.set(settings.get("scan_char_limit", str(DEFAULT_SCAN_CHAR_LIMIT)))
 	temp_var.set(settings.get("temperature", "0.5"))
 
 	glossary_text.delete("1.0", tk.END)
@@ -319,11 +251,6 @@ def apply_settings(settings):
 
 	prompt_text.delete("1.0", tk.END)
 	prompt_text.insert(tk.END, settings.get("prompt", DEFAULT_PROMPT))
-	rate_limits = settings.get("model_rate_limits", DEFAULT_MODEL_RATE_LIMITS_PER_MIN)
-	if "model_rate_limit_vars" in globals():
-		for model in MODELS:
-			value = rate_limits.get(model, DEFAULT_MODEL_RATE_LIMITS_PER_MIN.get(model, 10))
-			model_rate_limit_vars[model].set(str(value))
 
 	current_theme = settings.get("theme", "dark")
 
@@ -350,11 +277,22 @@ def add_log(message):
 	timestamp = time.strftime("%H:%M:%S")
 	log_message = f"[{timestamp}] {message}\n"
 
-	if "log_box" in globals():
-		log_box.config(state="normal")
-		log_box.insert(tk.END, log_message)
-		log_box.see(tk.END)
-		log_box.config(state="disabled")
+	def _append_to_log_box():
+		if "log_box" in globals() and log_box.winfo_exists():
+			log_box.config(state="normal")
+			log_box.insert(tk.END, log_message)
+			log_box.see(tk.END)
+			log_box.config(state="disabled")
+
+	# Tkinter không thread-safe: mọi thao tác UI phải chạy ở main thread.
+	if threading.current_thread() is threading.main_thread():
+		_append_to_log_box()
+	else:
+		try:
+			if "root" in globals() and root.winfo_exists():
+				root.after(0, _append_to_log_box)
+		except Exception:
+			pass
 
 	print(log_message.strip())
 
@@ -779,6 +717,14 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 				return _safe_int(value)
 		return 0
 
+	def _safe_str(value):
+		if value is None:
+			return ""
+		try:
+			return str(value)
+		except Exception:
+			return ""
+
 	model = genai.GenerativeModel(model_name=model_id)
 	full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
 	response = model.generate_content(
@@ -807,8 +753,15 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 	input_tokens = _usage_get(usage_data, ["prompt_token_count", "input_token_count"])
 	output_tokens = _usage_get(usage_data, ["candidates_token_count", "output_token_count"])
 
-	if hasattr(response, "text") and response.text:
-		return response.text.strip(), input_tokens, output_tokens
+	# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
+	response_text = ""
+	try:
+		response_text = _safe_str(getattr(response, "text", "")).strip()
+	except Exception:
+		response_text = ""
+
+	if response_text:
+		return response_text, input_tokens, output_tokens
 
 	candidates = getattr(response, "candidates", None) or []
 	for candidate in candidates:
@@ -818,11 +771,27 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		if texts:
 			return "\n".join(texts).strip(), input_tokens, output_tokens
 
-	return "", input_tokens, output_tokens
+	prompt_feedback = getattr(response, "prompt_feedback", None)
+	block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
+	block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
+	finish_reason = ""
+	if candidates:
+		finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
+
+	meta = []
+	meta.append(f"candidates={len(candidates)}")
+	if finish_reason:
+		meta.append(f"finish_reason={finish_reason}")
+	if block_reason:
+		meta.append(f"block_reason={block_reason}")
+	if block_message:
+		meta.append(f"block_message={block_message}")
+
+	raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
 
 
 # ================= DỊCH 1 CHUNK =================
-def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, rate_limiter, retries=3):
+def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, retries=3):
 	global is_stopped
 
 	pause_event.wait()
@@ -837,12 +806,6 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 		pause_event.wait()
 
 		try:
-			waited_seconds = rate_limiter.wait_for_slot(model_id)
-			if waited_seconds is None:
-				return index, None
-			if waited_seconds >= 0.5:
-				add_log(f"🚦 Model {model_id} đã đạt giới hạn, chờ {waited_seconds:.1f}s trước khi gửi đoạn {index + 1}.")
-
 			add_log(f"⏳ Đang dịch đoạn {index + 1}... (lần thử {attempt + 1}/{retries})")
 			translated_text, input_tokens, output_tokens = translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens)
 			input_price_per_1m, output_price_per_1m = get_model_prices_usd_per_1m(model_id, input_tokens)
@@ -953,17 +916,185 @@ def validate_inputs():
 		messagebox.showerror("Lỗi", "Nhiệt độ phải nằm trong khoảng 0 đến 2.")
 		return False
 
-	for model in MODELS:
-		raw_limit = model_rate_limit_vars[model].get().strip()
-		try:
-			limit = int(raw_limit)
-			if limit < 1 or limit > 1200:
-				raise ValueError
-		except Exception:
-			messagebox.showerror("Lỗi", f"Giới hạn request/phút cho model '{model}' phải là số nguyên từ 1 đến 1200.")
-			return False
-
 	return True
+
+
+def normalize_scanned_glossary(raw_text):
+	"""Chuẩn hóa output quét thuật ngữ về format 'nguồn => đích'."""
+	if not raw_text:
+		return ""
+
+	cleaned_lines = []
+	seen = set()
+	for line in raw_text.splitlines():
+		clean = line.strip().lstrip("-•* ").strip()
+		if not clean:
+			continue
+
+		separator = None
+		for candidate in ["=>", "->", "→", ":", "="]:
+			if candidate in clean:
+				separator = candidate
+				break
+
+		if not separator:
+			continue
+
+		source, target = clean.split(separator, 1)
+		source = source.strip(" \t\"'“”‘’[](){}")
+		target = target.strip(" \t\"'“”‘’[](){}")
+		if not source or not target:
+			continue
+
+		normalized = f"{source} => {target}"
+		key = normalized.lower()
+		if key in seen:
+			continue
+		seen.add(key)
+		cleaned_lines.append(normalized)
+
+	return "\n".join(cleaned_lines)
+
+
+def get_scan_char_limit():
+	try:
+		scan_char_limit = int(scan_char_limit_var.get())
+		if scan_char_limit < 500 or scan_char_limit > 200000:
+			raise ValueError
+		return scan_char_limit
+	except Exception:
+		messagebox.showerror("Lỗi", "Giới hạn ký tự quét phải là số nguyên từ 500 đến 200000.")
+		return None
+
+
+def build_scan_segments(text, segment_size=12000, max_segments=12):
+	"""Tạo các đoạn quét glossary từ văn bản, phân bố đều để tăng độ phủ."""
+	if not text:
+		return []
+
+	segments = []
+	paragraphs = text.split("\n\n")
+	bucket = ""
+
+	for para in paragraphs:
+		part = para if para == paragraphs[-1] else para + "\n\n"
+		if len(bucket) + len(part) > segment_size and bucket.strip():
+			segments.append(bucket)
+			bucket = part
+		else:
+			bucket += part
+
+	if bucket.strip():
+		segments.append(bucket)
+
+	if not segments:
+		segments = [text[:segment_size]]
+
+	if len(segments) <= max_segments:
+		return segments
+
+	# Lấy mẫu đều trên toàn bộ truyện thay vì chỉ phần đầu.
+	selected = []
+	selected_positions = set()
+	for i in range(max_segments):
+		pos = int(round(i * (len(segments) - 1) / (max_segments - 1))) if max_segments > 1 else 0
+		if pos not in selected_positions:
+			selected_positions.add(pos)
+			selected.append(segments[pos])
+
+	return selected
+
+def scan_story():
+	if not validate_inputs():
+		return
+
+	scan_char_limit = get_scan_char_limit()
+	if scan_char_limit is None:
+		return
+	
+	api_key = api_key_entry.get().strip()
+	genai.configure(api_key=api_key)
+	in_file = input_path.get()
+	chunk_size = int(chunk_size_var.get())
+	model_id = model_var.get()
+	temperature = float(temp_var.get())
+	
+	def run_scan():
+		try:
+			add_log(f"🔍 Đang quét thuật ngữ (tối đa {scan_char_limit:,} ký tự, có thể mất 10-60 giây)...")
+			
+			with open(in_file, "r", encoding="utf-8") as f:
+				full_text = f.read()
+
+			limited_text = full_text[:scan_char_limit]
+			scan_segments = build_scan_segments(limited_text, segment_size=12000, max_segments=12)
+			add_log(f"🧩 Quét {len(scan_segments)} đoạn mẫu để tăng độ phủ thuật ngữ.")
+
+			scan_prompt = (
+				"Bạn là chuyên gia biên tập truyện dịch từ Trung sang Việt.\n"
+				"Hãy trích xuất danh sách thuật ngữ quan trọng từ đoạn sau, ưu tiên:\n\n"
+				"1. TỪ HÁN VIỆT CẦN CHUYỂN SANG THUẦN VIỆT (định dạng: từ_hán_việt => từ_thuần_việt):\n"
+				"   VD: phát_hiện => tìm_thấy, cao_hứng => vui_vẻ, chuẩn_bị => sắp_sửa\n\n"
+				"2. TÊN RIÊNG - TÊN NHÂN VẬT, ĐỊA DANH (định dạng: tên_gốc => tên_đã_dịch):\n"
+				"   VD: 张三 => Trương Tam, 青云门 => Thanh Vân Môn\n\n"
+				"3. CÁCH HÔ / XƯNG HÔ GIỮA NHÂN VẬT (định dạng: cách_hô_gốc => cách_hô_việt):\n"
+				"   VD: 师兄 => sư huynh, 宝贝 => bảo bối, 主人 => chủ nhân\n\n"
+				"ĐỊNH DẠNG BẮT BUỘC: mỗi dòng một mục theo mẫu: Nguồn => Đích\n\n"
+				"YÊU CẦU:\n"
+				"- Không giải thích, không đánh số, không thêm tiêu đề\n"
+				"- Không lặp mục đã có\n"
+				"- Nếu không có thuật ngữ thì trả: Không có"
+			)
+
+			merged_terms = []
+			seen_terms = set()
+
+			for seg_idx, segment in enumerate(scan_segments, 1):
+				add_log(f"🔎 Quét đoạn mẫu {seg_idx}/{len(scan_segments)}...")
+				raw_result, _, _ = translate_with_gemini(model_id, scan_prompt, segment, temperature, 3072)
+				if not raw_result or "không có" in raw_result.lower():
+					continue
+
+				normalized = normalize_scanned_glossary(raw_result)
+				if not normalized:
+					continue
+
+				for term_line in normalized.splitlines():
+					term_key = term_line.strip().lower()
+					if not term_key or term_key in seen_terms:
+						continue
+					seen_terms.add(term_key)
+					merged_terms.append(term_line.strip())
+
+				time.sleep(0.35)
+
+			extracted_terms = "\n".join(merged_terms)
+
+			if extracted_terms:
+				add_log(f"✅ Quét xong thuật ngữ! Tìm thấy {len(merged_terms)} mục.")
+				
+				def ask_user():
+					if messagebox.askyesno("Kết quả quét thuật ngữ", f"Đã tìm thấy các thuật ngữ:\n\n{extracted_terms}\n\nBạn có muốn thêm vào Glossary không?"):
+						current_glossary = glossary_text.get("1.0", tk.END).strip()
+						if current_glossary:
+							new_glossary = current_glossary + "\n" + extracted_terms
+						else:
+							new_glossary = extracted_terms
+						glossary_text.delete("1.0", tk.END)
+						glossary_text.insert(tk.END, new_glossary)
+						add_log("📝 Đã thêm thuật ngữ vào Glossary.")
+				
+				root.after(0, ask_user)
+			else:
+				add_log("ℹ️ Không tìm thấy thuật ngữ đặc biệt nào.")
+				root.after(0, lambda: messagebox.showinfo("Kết quả", "Không tìm thấy thuật ngữ đặc biệt nào từ các đoạn đầu truyện."))
+				
+		except Exception as e:
+			add_log(f"🛑 Lỗi khi quét thuật ngữ: {e}")
+			root.after(0, lambda: messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {e}"))
+			
+	threading.Thread(target=run_scan, daemon=True).start()
+
 
 
 # ================= 1. PHƯƠNG THỨC KÍCH HOẠT (START) =================
@@ -1036,15 +1167,12 @@ def process_translation_logic():
 		chunk_size = int(chunk_size_var.get())
 		max_output_tokens = int(max_output_tokens_var.get())
 		temperature = float(temp_var.get())
-		model_rate_limits = get_model_rate_limits_from_ui()
-		rate_limiter = PerModelRateLimiter(model_rate_limits)
 		prompt = prompt_text.get("1.0", tk.END).strip()
 		glossary_raw = glossary_text.get("1.0", tk.END).strip()
 		glossary_entries = parse_glossary(glossary_raw)
 		prompt = build_prompt_with_glossary(prompt, glossary_entries)
 		if glossary_entries:
 			add_log(f"📚 Áp dụng glossary: {len(glossary_entries)} mục thuật ngữ.")
-		add_log(f"🚦 Giới hạn request model {model}: {model_rate_limits.get(model, 10)} req/phút")
 
 		with open(in_file, "r", encoding="utf-8") as f:
 			chunks = split_text(f.read(), size=chunk_size)
@@ -1090,7 +1218,6 @@ def process_translation_logic():
 					cp_file,
 					temperature,
 					max_output_tokens,
-					rate_limiter,
 				): i
 				for i in pending_indices
 			}
@@ -1656,11 +1783,8 @@ model_var = tk.StringVar(value=MODELS[0])
 thread_var = tk.StringVar(value="3")
 chunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))
 max_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))
+scan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))
 temp_var = tk.StringVar(value="0.5")
-model_rate_limit_vars = {
-	model: tk.StringVar(value=str(DEFAULT_MODEL_RATE_LIMITS_PER_MIN.get(model, 10)))
-	for model in MODELS
-}
 
 entry_opts = {
 	"bg": PALETTE["input_bg"],
@@ -1829,47 +1953,46 @@ def update_temp_label(event=None):
 temp_scale.bind("<Motion>", update_temp_label)
 temp_scale.bind("<ButtonRelease-1>", update_temp_label)
 
-tk.Label(
-	card_config,
-	text="Giới hạn request/phút theo model",
-	bg=PALETTE["panel"],
-	fg=PALETTE["text_muted"],
-	font=("Segoe UI", 9, "bold"),
-).grid(row=6, column=0, sticky="w", pady=(8, 4))
-
-rate_limit_frame = tk.Frame(card_config, bg=PALETTE["panel"])
-rate_limit_frame.grid(row=7, column=0, columnspan=2, sticky="ew")
-rate_limit_frame.columnconfigure(0, weight=1)
-
-for row_index, model in enumerate(MODELS):
-	ttk.Label(
-		rate_limit_frame,
-		text=model,
-		style="Section.TLabel",
-	).grid(row=row_index, column=0, sticky="w", pady=2)
-	tk.Entry(
-		rate_limit_frame,
-		textvariable=model_rate_limit_vars[model],
-		width=8,
-	).grid(row=row_index, column=1, sticky="e", padx=(10, 0), pady=2)
-
-tk.Label(
-	card_config,
-	text="Áp dụng quota riêng cho từng model trong 60 giây.",
-	bg=PALETTE["panel"],
-	fg=PALETTE["text_muted"],
-	font=("Segoe UI", 8),
-).grid(row=8, column=0, columnspan=2, sticky="w", pady=(4, 0))
-
 card_prompt = build_card(translate_tab, "📝 Prompt dịch giả", 0, 3, colspan=2)
 
+glossary_header_frame = tk.Frame(card_prompt, bg=PALETTE["panel"])
+glossary_header_frame.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+glossary_header_frame.columnconfigure(0, weight=1)
+
 tk.Label(
-	card_prompt,
+	glossary_header_frame,
 	text="Glossary/Từ điển thuật ngữ (mỗi dòng: nguồn => đích)",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=1, column=0, sticky="w", pady=(0, 4))
+).pack(side="left")
+
+scan_limit_frame = tk.Frame(glossary_header_frame, bg=PALETTE["panel"])
+scan_limit_frame.pack(side="right")
+
+tk.Label(
+	scan_limit_frame,
+	text="Giới hạn ký tự quét:",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 8, "bold"),
+).pack(side="left", padx=(0, 4))
+
+scan_limit_entry = tk.Entry(scan_limit_frame, textvariable=scan_char_limit_var, width=8, **entry_opts)
+scan_limit_entry.pack(side="left", padx=(0, 8))
+
+tk.Button(
+	scan_limit_frame,
+	text="🔍 Quét thuật ngữ",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=2,
+	cursor="hand2",
+	command=scan_story
+).pack(side="right")
 
 glossary_text = tk.Text(
 	card_prompt,
