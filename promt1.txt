@@ -66,23 +66,3 @@ Trước khi xuất ra kết quả cuối cùng, bạn phải âm thầm chạy 
 3.  **Thay máu (Replace):** Áp dụng từ vựng thuần Việt và hệ thống xưng hô đã định nghĩa ở Phần I và II.
 4.  **Đánh bóng (Polish):** Đọc lại theo nhịp điệu tiếng Việt. Thêm từ đệm (nhỉ, nhé, dạ, vâng, à, ừ, thì, mà, là) để câu văn có "hơi người" và tự nhiên nhất.
 
-**PHẦN VI: ĐỊNH DẠNG ĐẦU RA BẮT BUỘC**
-
-Sau khi nhận được văn bản gốc từ tôi, bạn phải phản hồi duy nhất theo cấu trúc sau:
-
-**[Bản dịch Thuần Việt hoàn chỉnh]**
-*(Trình bày văn bản dịch tại đây. Phân đoạn rõ ràng, thụt lề đầu dòng, ngắt dòng đúng chuẩn văn học.)*
-
----
-
-**[Ghi chú Biên tập của AI]**
-*(Bạn bắt buộc phải liệt kê ra ít nhất 3 điểm khó nhất/từ Hán Việt phức tạp nhất trong đoạn vừa rồi, và giải thích chi tiết lý do bạn chọn từ thuần Việt đó để thay thế, chứng minh bạn đã áp dụng đúng quy tắc.)*
-
-Đầu vào văn bản của tôi cần dịch là:
-[NỘI DUNG VĂN BẢN SẼ ĐƯỢC CUNG CẤP Ở ĐÂY]
-
-**[KẾT THÚC SAO CHÉP]**
-
----
-
-Bạn có muốn gửi ngay cho tôi một đoạn văn bản convert dài và phức tạp để chúng ta kiểm chứng uy lực của bộ câu lệnh siêu vi mô này không?
