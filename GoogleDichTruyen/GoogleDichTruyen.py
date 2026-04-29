@@ -783,12 +783,10 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		usage_data = {
 			"prompt_token_count": getattr(usage, "prompt_token_count", None),
 			"candidates_token_count": getattr(usage, "candidates_token_count", None),
-			"input_token_count": getattr(usage, "input_token_count", None),
-			"output_token_count": getattr(usage, "output_token_count", None),
 		}
 
-	input_tokens = _usage_get(usage_data, ["prompt_token_count", "input_token_count"])
-	output_tokens = _usage_get(usage_data, ["candidates_token_count", "output_token_count"])
+	input_tokens = _usage_get(usage_data, ["prompt_token_count"])
+	output_tokens = _usage_get(usage_data, ["candidates_token_count"])
 
 	# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
 	response_text = ""
