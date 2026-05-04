@@ -247,7 +247,7 @@ def _load_and_run_google_app() -> None:
 	patched_source = patched_source.replace(
 		"temp_var = tk.StringVar(value=\"0.5\")",
 		"""temp_var = tk.StringVar(value="0.5")
-thinking_level_var = tk.StringVar(value="minimal")""",
+thinking_level_var = tk.StringVar(value="Minimal")""",
 	)
 
 
@@ -259,22 +259,17 @@ tk.Label(
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=6, column=0, sticky="w", pady=(8, 2))
+).grid(row=6, column=0, sticky="w")
 
-thinking_level_frame = tk.Frame(card_config, bg=PALETTE["panel"])
-thinking_level_frame.grid(row=7, column=0, sticky="ew", pady=(0, 8))
-
-for level in ["minimal", "high"]:
-	tk.Radiobutton(
-		thinking_level_frame,
-		text=level.capitalize(),
-		variable=thinking_level_var,
-		value=level,
-		bg=PALETTE["panel"],
-		fg=PALETTE["text"],
-		selectcolor=PALETTE["accent"],
-		font=("Segoe UI", 9),
-	).pack(side="left", padx=6)
+thinking_level_cb = ttk.Combobox(
+	card_config,
+	values=["Minimal", "High"],
+	textvariable=thinking_level_var,
+	state="readonly",
+	width=20,
+)
+thinking_level_cb.set("Minimal")
+thinking_level_cb.grid(row=7, column=0, sticky="ew", pady=(2, 8))
 '''
 
 	after_temp_line = """temp_label = tk.Label(
@@ -300,12 +295,17 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)"""
 	)
 
 	patched_source = patched_source.replace(
-		"generation_config=genai.types.GenerationConfig(\n\t\t\ttemperature=temperature,\n\t\t\tmax_output_tokens=max_output_tokens,\n\t\t),",
-		"""generation_config=genai.types.GenerationConfig(
-			temperature=temperature,
-			max_output_tokens=max_output_tokens,
-			thinking_level=thinking_level,
-		),""",
+		"def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):\n\tdef _safe_int(value):",
+		"""def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):
+	global thinking_level_var
+	thinking_level = thinking_level_var.get().lower() if thinking_level_var else "minimal"
+	
+	def _safe_int(value):""",
+	)
+
+	patched_source = patched_source.replace(
+		"temperature=temperature,\n\t\t\tmax_output_tokens=max_output_tokens,\n\t\t),",
+		"temperature=temperature,\n\t\t\tmax_output_tokens=max_output_tokens,\n\t\t\tthinking_level=thinking_level,\n\t\t),",
 	)
 
 	import tkinter as tk
