@@ -85,6 +85,13 @@ MODEL_PRICING = {
 USD_TO_VND = 27000
 
 
+# ================= QUOTA & ERROR HANDLING =================
+def is_quota_exceeded_error(error_str: str) -> bool:
+	"""Check if error is due to quota/rate limit (429 RESOURCE_EXHAUSTED)."""
+	error_lower = str(error_str).lower()
+	return "429" in error_lower or "resource_exhausted" in error_lower or "quota" in error_lower or "rate limit" in error_lower
+
+
 def get_model_prices_usd_per_1m(model_id, input_tokens):
 	pricing = MODEL_PRICING.get(model_id, {"input_per_1m": 0.0, "output_per_1m": 0.0})
 	if model_id == "gemini-3.1-pro-preview":
@@ -181,6 +188,7 @@ def load_settings():
 		"input_file": "",
 		"output_file": "",
 		"model": MODELS[0],
+		"model_fallback_order": "|".join(MODELS),
 		"threads": "3",
 		"chunk_size": str(CHUNK_SIZE),
 		"max_output_tokens": str(MAX_OUTPUT_TOKENS),
@@ -215,6 +223,7 @@ def save_settings():
 		"input_file": input_path.get(),
 		"output_file": output_path.get(),
 		"model": model_var.get(),
+		"model_fallback_order": model_fallback_order_var.get(),
 		"threads": thread_var.get(),
 		"chunk_size": chunk_size_var.get(),
 		"max_output_tokens": max_output_tokens_var.get(),
@@ -240,6 +249,7 @@ def apply_settings(settings):
 	input_path.set(settings.get("input_file", ""))
 	output_path.set(settings.get("output_file", ""))
 	model_var.set(settings.get("model", MODELS[0]))
+	model_fallback_order_var.set(settings.get("model_fallback_order", "|".join(MODELS)))
 	thread_var.set(settings.get("threads", "3"))
 	chunk_size_var.set(settings.get("chunk_size", str(CHUNK_SIZE)))
 	max_output_tokens_var.set(settings.get("max_output_tokens", str(MAX_OUTPUT_TOKENS)))
@@ -741,6 +751,9 @@ def extract_json_from_response(raw_text):
 
 
 def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):
+	"""Translate text using Gemini. Returns (text, input_tokens, output_tokens, error_code).
+	Error codes: None = success, 'QUOTA' = rate limit exceeded, 'ERROR' = other error.
+	"""
 	def _safe_int(value):
 		try:
 			return int(value)
@@ -762,67 +775,75 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		except Exception:
 			return ""
 
-	model = genai.GenerativeModel(model_name=model_id)
-	full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
-	response = model.generate_content(
-		full_prompt,
-		generation_config=genai.types.GenerationConfig(
-			temperature=temperature,
-			max_output_tokens=max_output_tokens,
-		),
-	)
-
-	usage = getattr(response, "usage_metadata", None)
-	if usage is None:
-		usage_data = {}
-	elif isinstance(usage, dict):
-		usage_data = usage
-	elif hasattr(usage, "to_dict"):
-		usage_data = usage.to_dict()
-	else:
-		usage_data = {
-			"prompt_token_count": getattr(usage, "prompt_token_count", None),
-			"candidates_token_count": getattr(usage, "candidates_token_count", None),
-		}
-
-	input_tokens = _usage_get(usage_data, ["prompt_token_count"])
-	output_tokens = _usage_get(usage_data, ["candidates_token_count"])
-
-	# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
-	response_text = ""
 	try:
-		response_text = _safe_str(getattr(response, "text", "")).strip()
-	except Exception:
+		model = genai.GenerativeModel(model_name=model_id)
+		full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
+		response = model.generate_content(
+			full_prompt,
+			generation_config=genai.types.GenerationConfig(
+				temperature=temperature,
+				max_output_tokens=max_output_tokens,
+			),
+		)
+
+		usage = getattr(response, "usage_metadata", None)
+		if usage is None:
+			usage_data = {}
+		elif isinstance(usage, dict):
+			usage_data = usage
+		elif hasattr(usage, "to_dict"):
+			usage_data = usage.to_dict()
+		else:
+			usage_data = {
+				"prompt_token_count": getattr(usage, "prompt_token_count", None),
+				"candidates_token_count": getattr(usage, "candidates_token_count", None),
+			}
+
+		input_tokens = _usage_get(usage_data, ["prompt_token_count"])
+		output_tokens = _usage_get(usage_data, ["candidates_token_count"])
+
+		# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
 		response_text = ""
+		try:
+			response_text = _safe_str(getattr(response, "text", "")).strip()
+		except Exception:
+			response_text = ""
 
-	if response_text:
-		return response_text, input_tokens, output_tokens
+		if response_text:
+			return response_text, input_tokens, output_tokens, None
 
-	candidates = getattr(response, "candidates", None) or []
-	for candidate in candidates:
-		content = getattr(candidate, "content", None)
-		parts = getattr(content, "parts", None) or []
-		texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
-		if texts:
-			return "\n".join(texts).strip(), input_tokens, output_tokens
+		candidates = getattr(response, "candidates", None) or []
+		for candidate in candidates:
+			content = getattr(candidate, "content", None)
+			parts = getattr(content, "parts", None) or []
+			texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
+			if texts:
+				return "\n".join(texts).strip(), input_tokens, output_tokens, None
 
-	prompt_feedback = getattr(response, "prompt_feedback", None)
-	block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
-	block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
-	finish_reason = ""
-	if candidates:
-		finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
+		prompt_feedback = getattr(response, "prompt_feedback", None)
+		block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
+		block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
+		finish_reason = ""
+		if candidates:
+			finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
 
-	meta = []
-	meta.append(f"candidates={len(candidates)}")
-	if finish_reason:
-		meta.append(f"finish_reason={finish_reason}")
-	if block_reason:
-		meta.append(f"block_reason={block_reason}")
-	if block_message:
-		meta.append(f"block_message={block_message}")
+		meta = []
+		meta.append(f"candidates={len(candidates)}")
+		if finish_reason:
+			meta.append(f"finish_reason={finish_reason}")
+		if block_reason:
+			meta.append(f"block_reason={block_reason}")
+		if block_message:
+			meta.append(f"block_message={block_message}")
 
-	raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
+		raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
+
+	except Exception as e:
+		error_str = str(e)
+		if is_quota_exceeded_error(error_str):
+			return None, 0, 0, 'QUOTA'
+		else:
+			return None, 0, 0, 'ERROR'
 
 
 def build_consistency_analysis_prompt(chunked_translated_text):
@@ -987,14 +1008,19 @@ def run_consistency_check():
 
 
 # ================= DỊCH 1 CHUNK =================
-def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, retries=3):
+def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3):
 	global is_stopped
 
 	pause_event.wait()
 	if is_stopped:
 		return index, None
 
+	if model_fallback_order is None:
+		model_fallback_order = [model_id]
+	
 	last_error = None
+	current_model_index = 0
+	
 	for attempt in range(retries):
 		if is_stopped:
 			return index, None
@@ -1002,12 +1028,30 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 		pause_event.wait()
 
 		try:
-			add_log(f"⏳ Đang dịch đoạn {index + 1}... (lần thử {attempt + 1}/{retries})")
-			translated_text, input_tokens, output_tokens = translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens)
-			input_price_per_1m, output_price_per_1m = get_model_prices_usd_per_1m(model_id, input_tokens)
-			input_cost = (input_tokens / 1_000_000) * input_price_per_1m
-			output_cost = (output_tokens / 1_000_000) * output_price_per_1m
-
+			current_model = model_fallback_order[current_model_index] if current_model_index < len(model_fallback_order) else model_fallback_order[0]
+			add_log(f"⏳ Đang dịch đoạn {index + 1} (model: {current_model})... (lần thử {attempt + 1}/{retries})")
+			
+			translated_text, input_tokens, output_tokens, error_code = translate_with_gemini(current_model, prompt, chunk, temperature, max_output_tokens)
+			
+			if error_code == 'QUOTA':
+				if current_model_index + 1 < len(model_fallback_order):
+					current_model_index += 1
+					next_model = model_fallback_order[current_model_index]
+					add_log(f"⚠️ Đoạn {index + 1}: Vượt quota model '{current_model}', chuyển sang '{next_model}'...")
+					time.sleep(1)
+					continue
+				else:
+					add_log(f"❌ Đoạn {index + 1}: Tất cả model đều vượt quota!")
+					last_error = "Tất cả model vượt quota"
+					time.sleep(2 + attempt * 2)
+					continue
+			
+			if error_code == 'ERROR':
+				last_error = "Lỗi API"
+				add_log(f"⚠️ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
+				time.sleep(2 + attempt * 2)
+				continue
+			
 			if not translated_text:
 				raise RuntimeError("Gemini trả về nội dung rỗng.")
 
@@ -1018,6 +1062,9 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			stats["total_output_chars"] += len(translated_text)
 			stats["total_input_tokens"] += input_tokens
 			stats["total_output_tokens"] += output_tokens
+			input_price_per_1m, output_price_per_1m = get_model_prices_usd_per_1m(current_model, input_tokens)
+			input_cost = (input_tokens / 1_000_000) * input_price_per_1m
+			output_cost = (output_tokens / 1_000_000) * output_price_per_1m
 			stats["total_input_cost_usd"] += input_cost
 			stats["total_output_cost_usd"] += output_cost
 			stats["total_cost_usd"] = stats["total_input_cost_usd"] + stats["total_output_cost_usd"]
@@ -1358,6 +1405,16 @@ def process_translation_logic():
 		in_file = input_path.get()
 		out_file = output_path.get()
 		model = model_var.get()
+		model_fallback_order_str = model_fallback_order_var.get()
+		model_fallback_order = [m.strip() for m in model_fallback_order_str.split("|") if m.strip()]
+		if not model_fallback_order:
+			model_fallback_order = [model]
+		if model in model_fallback_order:
+			model_fallback_order = [m for m in model_fallback_order if m != model]
+		model_fallback_order = [model] + model_fallback_order
+		if model_fallback_order:
+			fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(model_fallback_order)}")
+			add_log(f"🔄 Model fallback order: {' -> '.join(model_fallback_order)}")
 		cp_file = get_checkpoint_path(in_file)
 		threads = int(thread_var.get())
 		chunk_size = int(chunk_size_var.get())
@@ -1414,6 +1471,7 @@ def process_translation_logic():
 					cp_file,
 					temperature,
 					max_output_tokens,
+					model_fallback_order,
 				): i
 				for i in pending_indices
 			}
@@ -1980,6 +2038,8 @@ chunk_listbox.bind('<<ListboxSelect>>', on_chunk_select)
 input_path = tk.StringVar()
 output_path = tk.StringVar()
 model_var = tk.StringVar(value=MODELS[0])
+model_fallback_order_var = tk.StringVar(value="|".join(MODELS))  # Model order for fallback when quota exceeded
+fallback_order_hint_var = tk.StringVar(value="Thứ tự fallback hiệu lực: --")
 thread_var = tk.StringVar(value="3")
 chunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))
 max_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))
@@ -2141,6 +2201,65 @@ api_key_frame.columnconfigure(0, weight=1)
 api_key_entry = tk.Entry(api_key_frame, show="*", width=70, **entry_opts)
 api_key_entry.grid(row=0, column=0, sticky="ew")
 
+def open_model_fallback_dialog():
+	dialog = tk.Toplevel(root)
+	dialog.title("Cấu hình Model Fallback")
+	dialog.geometry("400x350")
+	dialog.resizable(False, False)
+	dialog.configure(bg=PALETTE["bg"])
+	
+	tk.Label(dialog, text="Sắp xếp thứ tự model khi vượt quota:", bg=PALETTE["bg"], fg=PALETTE["text"], font=("Segoe UI", 10)).pack(padx=10, pady=10)
+	
+	frame = tk.Frame(dialog, bg=PALETTE["panel"], bd=1, relief="solid")
+	frame.pack(padx=10, pady=(0, 10), fill="both", expand=True)
+	
+	current_order = [m.strip() for m in model_fallback_order_var.get().split("|") if m.strip()]
+	if not current_order:
+		current_order = MODELS
+	
+	listbox = tk.Listbox(frame, bg=PALETTE["input_bg"], fg=PALETTE["text"], selectbackground=PALETTE["accent_alt"], font=("Segoe UI", 10), activestyle="none", bd=0, highlightthickness=0)
+	for model in current_order:
+		listbox.insert(tk.END, model)
+	listbox.pack(fill="both", expand=True, padx=5, pady=5)
+	
+	btn_frame = tk.Frame(dialog, bg=PALETTE["bg"])
+	btn_frame.pack(padx=10, pady=(0, 10), fill="x")
+	
+	def move_up():
+		sel = listbox.curselection()
+		if sel and sel[0] > 0:
+			idx = sel[0]
+			items = list(listbox.get(0, tk.END))
+			items[idx], items[idx-1] = items[idx-1], items[idx]
+			listbox.delete(0, tk.END)
+			listbox.insert(0, *items)
+			listbox.selection_set(idx-1)
+	
+	def move_down():
+		sel = listbox.curselection()
+		if sel and sel[0] < listbox.size() - 1:
+			idx = sel[0]
+			items = list(listbox.get(0, tk.END))
+			items[idx], items[idx+1] = items[idx+1], items[idx]
+			listbox.delete(0, tk.END)
+			listbox.insert(0, *items)
+			listbox.selection_set(idx+1)
+	
+	def save_order():
+		items = list(listbox.get(0, tk.END))
+		model_fallback_order_var.set("|".join(items))
+		add_log(f"Fallback order: {' -> '.join(items)}")
+		fallback_order_hint_var.set("Thứ tự fallback hiệu lực: (sẽ cập nhật khi bấm Bắt đầu dịch)")
+		dialog.destroy()
+	
+	tk.Button(btn_frame, text="Up", bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=6, command=move_up).pack(side="left", padx=2)
+	tk.Button(btn_frame, text="Down", bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=6, command=move_down).pack(side="left", padx=2)
+	tk.Button(btn_frame, text="Save", bg=PALETTE["ok"], fg="#0b0f19", bd=0, padx=10, pady=6, command=save_order).pack(side="right", padx=2)
+	tk.Button(btn_frame, text="Cancel", bg=PALETTE["warn"], fg="#0b0f19", bd=0, padx=10, pady=6, command=dialog.destroy).pack(side="right", padx=2)
+	
+	dialog.transient(root)
+	dialog.grab_set()
+
 def toggle_api_key_visibility():
 	if api_key_entry.cget('show') == '*':
 		api_key_entry.config(show='')
@@ -2211,11 +2330,34 @@ tk.Label(
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
 ).grid(row=1, column=0, sticky="w")
-model_cb = ttk.Combobox(card_config, values=MODELS, textvariable=model_var, state="readonly")
-model_cb.grid(row=2, column=0, sticky="ew", pady=(2, 8))
+model_frame = tk.Frame(card_config, bg=PALETTE["panel"])
+model_frame.grid(row=2, column=0, sticky="ew", pady=(2, 8))
+model_frame.columnconfigure(0, weight=1)
+model_cb = ttk.Combobox(model_frame, values=MODELS, textvariable=model_var, state="readonly")
+model_cb.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+tk.Button(
+	model_frame,
+	text="🔧 Fallback",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=6,
+	command=lambda: open_model_fallback_dialog(),
+).grid(row=0, column=1, sticky="ew")
+
+tk.Label(
+	card_config,
+	textvariable=fallback_order_hint_var,
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 8, "italic"),
+).grid(row=3, column=0, sticky="w", pady=(0, 6))
 
 perf_frame = tk.Frame(card_config, bg=PALETTE["panel"])
-perf_frame.grid(row=3, column=0, sticky="ew", pady=(2, 8))
+perf_frame.grid(row=4, column=0, sticky="ew", pady=(2, 8))
 for col in range(3):
 	perf_frame.columnconfigure(col, weight=1)
 
@@ -2255,7 +2397,7 @@ tk.Label(
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=4, column=0, sticky="w")
+).grid(row=5, column=0, sticky="w")
 temp_scale = ttk.Scale(
 	card_config,
 	from_=0.0,
@@ -2265,7 +2407,7 @@ temp_scale = ttk.Scale(
 	length=200,
 	style="Accent.Horizontal.TScale",
 )
-temp_scale.grid(row=5, column=0, sticky="ew")
+temp_scale.grid(row=6, column=0, sticky="ew")
 temp_label = tk.Label(
 	card_config,
 	textvariable=temp_var,
@@ -2273,7 +2415,7 @@ temp_label = tk.Label(
 	fg=PALETTE["accent"],
 	font=("Segoe UI", 10, "bold"),
 )
-temp_label.grid(row=5, column=1, padx=(8, 0))
+temp_label.grid(row=6, column=1, padx=(8, 0))
 
 
 def update_temp_label(event=None):
