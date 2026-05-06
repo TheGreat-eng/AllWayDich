@@ -62,3 +62,5 @@ tempt/
 *.pfx
 *.crt
 *.csr
+
+./GoogleDichTruyen/GoogleDichTruyenRateLimit.py
