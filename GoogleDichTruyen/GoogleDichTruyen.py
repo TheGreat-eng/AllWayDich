@@ -2046,6 +2046,23 @@ max_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))
 scan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))
 temp_var = tk.StringVar(value="0.5")
 
+def get_effective_fallback_order():
+	model = model_var.get().strip()
+	order = [m.strip() for m in model_fallback_order_var.get().split("|") if m.strip()]
+	if not order:
+		return [model] if model else []
+	if model:
+		order = [m for m in order if m != model]
+		order = [model] + order
+	return order
+
+def update_fallback_hint(*args):
+	order = get_effective_fallback_order()
+	if order:
+		fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(order)}")
+	else:
+		fallback_order_hint_var.set("Thứ tự fallback hiệu lực: --")
+
 entry_opts = {
 	"bg": PALETTE["input_bg"],
 	"fg": PALETTE["text"],
@@ -2249,7 +2266,7 @@ def open_model_fallback_dialog():
 		items = list(listbox.get(0, tk.END))
 		model_fallback_order_var.set("|".join(items))
 		add_log(f"Fallback order: {' -> '.join(items)}")
-		fallback_order_hint_var.set("Thứ tự fallback hiệu lực: (sẽ cập nhật khi bấm Bắt đầu dịch)")
+		update_fallback_hint()
 		dialog.destroy()
 	
 	tk.Button(btn_frame, text="Up", bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=6, command=move_up).pack(side="left", padx=2)
@@ -2335,6 +2352,9 @@ model_frame.grid(row=2, column=0, sticky="ew", pady=(2, 8))
 model_frame.columnconfigure(0, weight=1)
 model_cb = ttk.Combobox(model_frame, values=MODELS, textvariable=model_var, state="readonly")
 model_cb.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+model_cb.bind("<<ComboboxSelected>>", update_fallback_hint)
+model_var.trace_add("write", update_fallback_hint)
+model_fallback_order_var.trace_add("write", update_fallback_hint)
 
 tk.Button(
 	model_frame,
