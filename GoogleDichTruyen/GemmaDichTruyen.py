@@ -259,7 +259,7 @@ tk.Label(
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=6, column=0, sticky="w")
+).grid(row=7, column=0, sticky="w")
 
 thinking_level_cb = ttk.Combobox(
 	card_config,
@@ -269,7 +269,7 @@ thinking_level_cb = ttk.Combobox(
 	width=20,
 )
 thinking_level_cb.set("Minimal")
-thinking_level_cb.grid(row=7, column=0, sticky="ew", pady=(2, 8))
+thinking_level_cb.grid(row=8, column=0, sticky="ew", pady=(2, 8))
 '''
 
 	after_temp_line = """temp_label = tk.Label(
@@ -279,7 +279,7 @@ thinking_level_cb.grid(row=7, column=0, sticky="ew", pady=(2, 8))
 	fg=PALETTE["accent"],
 	font=("Segoe UI", 10, "bold"),
 )
-temp_label.grid(row=5, column=1, padx=(8, 0))
+temp_label.grid(row=6, column=1, padx=(8, 0))
 
 
 def update_temp_label(event=None):
@@ -298,7 +298,9 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)"""
 		"def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):\n\tdef _safe_int(value):",
 		"""def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):
 	global thinking_level_var
-	thinking_level = thinking_level_var.get().lower() if thinking_level_var else "minimal"
+	_level_map = {"minimal": "MINIMAL", "high": "HIGH"}
+	selected_level = thinking_level_var.get().strip().lower() if thinking_level_var else "minimal"
+	thinking_level = _level_map.get(selected_level, "MINIMAL")
 	
 	def _safe_int(value):""",
 	)

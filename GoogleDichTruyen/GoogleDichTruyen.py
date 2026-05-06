@@ -650,8 +650,12 @@ def split_text(text, size=CHUNK_SIZE):
 	chunks = []
 	current_chunk = ""
 	
-	# Nhận diện: "Chương X", "Thứ X chương", "Hồi X", "Quyển X"
-	pattern = re.compile(r"^\s*(Chương\s+\w+|Thứ\s+\w+\s+chương|Hồi\s+\w+|Quyển\s+\w+)", re.IGNORECASE)
+	# Nhận diện chương mới (khớp đầu dòng, không phân biệt hoa/thường).
+	strong_patterns = [
+		r"^\s*(chương|chap(?:ter)?|hồi|quyển|tập|thiên|phần|mục|tiết|ngoại\s*(truyện|chương)|phiên\s*ngoại|đệ\s+\w+\s+chương|thứ\s+\w+\s+chương)\b",
+		r"^\s*(ch\.|chap\.|c\.|q\.|t\.)\s*\d+\b",
+	]
+	strong_matchers = [re.compile(p, re.IGNORECASE) for p in strong_patterns]
 	
 	lines = text.splitlines(True)
 	
@@ -660,7 +664,7 @@ def split_text(text, size=CHUNK_SIZE):
 	current_block = ""
 	
 	for line in lines:
-		if pattern.match(line):
+		if any(matcher.match(line) for matcher in strong_matchers):
 			if current_block.strip():
 				blocks.append(current_block)
 			current_block = line
