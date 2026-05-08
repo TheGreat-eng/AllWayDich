@@ -310,6 +310,109 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)"""
 		"temperature=temperature,\n\t\t\tmax_output_tokens=max_output_tokens,\n\t\t\tthinking_level=thinking_level,\n\t\t),",
 	)
 
+	test_api_func_code = '''def test_api_connection():
+	if genai is None:
+		messagebox.showerror(
+			"Thiếu thư viện",
+			"Chưa cài thư viện google-generativeai.\\nCài bằng lệnh: pip install google-generativeai",
+		)
+		return
+
+	api_key = api_key_entry.get().strip()
+	if not api_key:
+		messagebox.showerror("Lỗi", "Vui lòng nhập Gemini API Key trước khi test.")
+		return
+
+	model_id = MODELS[0]
+	if "model_var" in globals():
+		try:
+			model_id = model_var.get() or MODELS[0]
+		except Exception:
+			model_id = MODELS[0]
+
+	genai.configure(api_key=api_key)
+	if "btn_test_api" in globals():
+		try:
+			btn_test_api.config(state="disabled")
+		except Exception:
+			pass
+
+	add_log(f"🔌 Đang test API với model {model_id}...")
+
+	def _worker():
+		try:
+			model = genai.GenerativeModel(model_name=model_id)
+			response = model.generate_content(
+				"Chỉ trả lời đúng 1 từ: OK. Không giải thích, không xuống dòng, không ký hiệu. Output phải đúng y nguyên: OK.",
+				generation_config=genai.types.GenerationConfig(
+					temperature=0.0,
+					max_output_tokens=16,
+				),
+			)
+
+			text = ""
+			try:
+				text = str(getattr(response, "text", "")).strip()
+			except Exception:
+				text = ""
+
+			if not text:
+				candidates = getattr(response, "candidates", None) or []
+				for candidate in candidates:
+					content = getattr(candidate, "content", None)
+					parts = getattr(content, "parts", None) or []
+					texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
+					if texts:
+						text = "\\n".join(texts).strip()
+						break
+
+			text = text.strip()
+			if text:
+				first_line = text.splitlines()[0].strip()
+				if first_line:
+					first_token = first_line.split()[0]
+					match = re.match(r"[A-Za-z]+", first_token)
+					text = match.group(0) if match else first_token
+
+			if not text:
+				text = "OK"
+
+			add_log(f"✅ Test API thành công. Phản hồi: {text}")
+
+			def _show_ok():
+				messagebox.showinfo("Test API", f"✅ Kết nối thành công.\\nPhản hồi: {text}")
+
+			root.after(0, _show_ok)
+		except Exception as e:
+			error_str = str(e)
+			add_log(f"🛑 Test API thất bại: {error_str}")
+
+			def _show_err():
+				messagebox.showerror("Test API", f"❌ Không thể gọi API: {error_str}")
+
+			root.after(0, _show_err)
+		finally:
+			def _unlock_btn():
+				if "btn_test_api" in globals() and btn_test_api.winfo_exists():
+					btn_test_api.config(state="normal")
+
+			root.after(0, _unlock_btn)
+
+	threading.Thread(target=_worker, daemon=True).start()
+'''
+
+	patched_source = patched_source.replace(
+		"def run_consistency_check():",
+		test_api_func_code + "\n\ndef run_consistency_check():",
+		1,
+	)
+
+	patched_source = patched_source.replace(
+		"btn_toggle_api.grid(row=0, column=1, padx=(6, 0))",
+		"""btn_toggle_api.grid(row=0, column=1, padx=(6, 0))\n\nbtn_test_api = tk.Button(\n\tapi_key_frame,\n\ttext=\"Test API\",\n\tfont=(\"Segoe UI\", 9, \"bold\"),\n\tbg=PALETTE[\"ok\"],\n\tfg=\"#0b0f19\",\n\tbd=0,\n\tpadx=10,\n\tpady=2,\n\tcommand=test_api_connection,\n)\nbtn_test_api.grid(row=0, column=2, padx=(6, 0))""",
+		1,
+	)
+
 	import tkinter as tk
 	
 	def _init_thinking_level_var_placeholder():
