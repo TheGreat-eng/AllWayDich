@@ -5,16 +5,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from urllib import error as urllib_error
-from urllib import request as urllib_request
+
+try:
+	from google import genai as google_genai
+	from google.genai import types as google_genai_types
+except ImportError:
+	google_genai = None
+	google_genai_types = None
 
 
-GEMMA_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMMA_MODEL_ID = "gemma-4-31b-it"
+GEMMA_DEFAULT_MODEL_ID = "gemma-4-26b-a4b-it"
 GEMMA_SETTINGS_FILENAME = "app_settings_gemma.json"
 GEMMA_HISTORY_FILENAME = "translation_history_gemma.json"
 GEMMA_SECRET_SALT = "GemmaDichTruyenSecretKey2026"
 GEMMA_WINDOW_TITLE = "📖 App Dịch Truyện – Gemma 4 Thinking"
+GEMMA_ENABLE_GOOGLE_SEARCH = True
 
 
 @dataclass
@@ -97,108 +102,114 @@ class _GemmaGenerativeModel:
 		return max(1, len(clean_text) // 4)
 
 	def generate_content(self, prompt: Any, generation_config: GenerationConfig | None = None, **kwargs: Any) -> _GemmaResponse:
+		if google_genai is None or google_genai_types is None:
+			raise RuntimeError("Chưa cài thư viện google-genai. Cài bằng lệnh: pip install google-genai")
+
 		if isinstance(prompt, list):
-			parts = []
+			pieces: list[str] = []
 			for item in prompt:
 				if not isinstance(item, dict):
 					continue
 				content = self._extract_text_content(item.get("content", ""))
 				if content:
-					parts.append({"text": content})
+					pieces.append(content)
+			prompt_text = "".join(pieces)
 		else:
-			parts = [{"text": self._extract_text_content(prompt)}]
+			prompt_text = self._extract_text_content(prompt)
 
-		payload: dict[str, Any] = {
-			"contents": [{"parts": parts}],
-			"generationConfig": {},
-		}
+		contents = [
+			google_genai_types.Content(
+				role="user",
+				parts=[google_genai_types.Part.from_text(text=prompt_text)],
+			)
+		]
 
 		temperature = getattr(generation_config, "temperature", None)
 		max_output_tokens = getattr(generation_config, "max_output_tokens", None)
 		thinking_level = getattr(generation_config, "thinking_level", None)
 
+		config_kwargs: dict[str, Any] = {}
 		if temperature is not None:
-			payload["generationConfig"]["temperature"] = temperature
+			config_kwargs["temperature"] = temperature
 		if max_output_tokens is not None:
-			payload["generationConfig"]["maxOutputTokens"] = max_output_tokens
-
+			config_kwargs["max_output_tokens"] = max_output_tokens
 		if thinking_level:
-			payload["generationConfig"]["thinking_config"] = {
-				"include_thoughts": True,
-				"thinking_level": thinking_level,
-			}
+			config_kwargs["thinking_config"] = google_genai_types.ThinkingConfig(
+				thinking_level=str(thinking_level).upper(),
+			)
+		if GEMMA_ENABLE_GOOGLE_SEARCH:
+			config_kwargs["tools"] = [
+				google_genai_types.Tool(googleSearch=google_genai_types.GoogleSearch()),
+			]
 
-		api_key = self._api_client.api_key.strip()
-		if not api_key:
-			raise RuntimeError("API Key không được để trống")
-
-		url = f"{GEMMA_BASE_URL}/{self._model_name}:generateContent?key={api_key}"
-		headers = {
-			"Content-Type": "application/json",
-		}
-
-		request = urllib_request.Request(
-			url,
-			data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-			headers=headers,
-			method="POST",
-		)
+		config = google_genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
 		try:
-			with urllib_request.urlopen(request, timeout=180) as response:
-				response_body = response.read().decode("utf-8", errors="replace")
-		except urllib_error.HTTPError as exc:
-			try:
-				error_body = exc.read().decode("utf-8", errors="replace")
-			except Exception:
-				error_body = exc.reason if getattr(exc, "reason", None) else str(exc)
-			raise RuntimeError(f"Gemma API error {exc.code}: {error_body}") from exc
+			client = self._api_client._get_client()
+			response = client.models.generate_content(
+				model=self._model_name,
+				contents=contents,
+				config=config,
+			)
 		except Exception as exc:
 			raise RuntimeError(f"Không gọi được Gemma API: {exc}") from exc
 
-		try:
-			data = json.loads(response_body)
-		except json.JSONDecodeError as exc:
-			raise RuntimeError(f"Gemma API trả về JSON không hợp lệ: {response_body[:500]}") from exc
+		response_text = str(getattr(response, "text", "") or "").strip()
+		usage = getattr(response, "usage_metadata", None)
+		prompt_tokens = 0
+		completion_tokens = 0
+		if isinstance(usage, dict):
+			prompt_tokens = int(usage.get("prompt_token_count") or usage.get("promptTokenCount") or 0)
+			completion_tokens = int(usage.get("candidates_token_count") or usage.get("candidatesTokenCount") or 0)
+		else:
+			prompt_tokens = int(getattr(usage, "prompt_token_count", 0) or getattr(usage, "promptTokenCount", 0) or 0)
+			completion_tokens = int(getattr(usage, "candidates_token_count", 0) or getattr(usage, "candidatesTokenCount", 0) or 0)
 
-		candidates = data.get("candidates") or []
-		candidate0 = candidates[0] if candidates else {}
-		content = candidate0.get("content") or {}
-		parts = content.get("parts") or []
-
-		full_text = ""
-		for part in parts:
-			if isinstance(part, dict):
-				text = part.get("text", "")
-				if text:
-					full_text += str(text)
-
-		usage = data.get("usageMetadata") or {}
-		prompt_tokens = usage.get("promptTokenCount") or usage.get("prompt_tokens") or 0
-		completion_tokens = usage.get("candidatesTokenCount") or usage.get("completion_tokens") or 0
-		finish_reason = candidate0.get("finishReason") or "STOP"
+		finish_reason = "STOP"
+		if not response_text:
+			candidates = getattr(response, "candidates", None) or []
+			for candidate in candidates:
+				content = getattr(candidate, "content", None)
+				parts = getattr(content, "parts", None) or []
+				texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
+				if texts:
+					response_text = "\n".join(texts).strip()
+					finish_reason = str(getattr(candidate, "finish_reason", "STOP") or "STOP")
+					break
 
 		if not prompt_tokens:
-			prompt_tokens = self._count_tokens("".join(p.get("text", "") for p in parts if isinstance(p, dict)))
+			prompt_tokens = self._count_tokens(prompt_text)
 		if not completion_tokens:
-			completion_tokens = self._count_tokens(full_text)
+			completion_tokens = self._count_tokens(response_text)
 
-		return _GemmaResponse(full_text, int(prompt_tokens), int(completion_tokens), str(finish_reason))
+		return _GemmaResponse(response_text, prompt_tokens, completion_tokens, finish_reason)
 
 
 class _GemmaGenAI:
 	def __init__(self):
 		self.api_key = ""
 		self.types = SimpleNamespace(GenerationConfig=GenerationConfig)
+		self._client = None
 
 	def configure(self, api_key: str | None = None, **kwargs: Any) -> None:
 		if api_key is not None:
 			self.api_key = str(api_key)
+			self._client = None
+
+	def _get_client(self) -> "google_genai.Client":
+		if google_genai is None:
+			raise RuntimeError("Chưa cài thư viện google-genai. Cài bằng lệnh: pip install google-genai")
+		api_key = self.api_key.strip()
+		if not api_key:
+			raise RuntimeError("API Key không được để trống")
+		if self._client is None:
+			self._client = google_genai.Client(api_key=api_key)
+		return self._client
 
 	def GenerativeModel(self, model_name: str | None = None, **kwargs: Any) -> _GemmaGenerativeModel:
 		if model_name is None:
 			model_name = kwargs.get("model_name")
-		return _GemmaGenerativeModel(self, GEMMA_MODEL_ID)
+		return _GemmaGenerativeModel(self, model_name or GEMMA_DEFAULT_MODEL_ID)
 
 
 genai = _GemmaGenAI()
@@ -243,7 +254,14 @@ def _load_and_run_google_app() -> None:
 		f'root.title("{GEMMA_WINDOW_TITLE}")',
 	)
 
-	gemma_model_list = """["gemma-4-31b-it", "gemma-4-26b-a4b-it"]"""
+	gemma_model_list = """[
+	"gemma-4-26b-a4b-it",
+	"gemma-4-31b-it"
+]"""
+	patched_source = patched_source.replace(
+		"MODELS = [\n\t\"gemini-3-flash-preview\",\n\t\"gemini-3.1-pro-preview\",\n\t\"gemini-2.5-flash\",\n\t\"gemini-2.5-flash-lite\",\n\t\"gemini-3.1-flash-lite-preview\",\n\t\"gemma-4-26b-a4b-it\",\n\t\"gemma-4-31b-it\"\n]",
+		"MODELS = " + gemma_model_list,
+	)
 	patched_source = patched_source.replace(
 		"temp_var = tk.StringVar(value=\"0.5\")",
 		"""temp_var = tk.StringVar(value="0.5")
@@ -259,7 +277,7 @@ tk.Label(
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=7, column=0, sticky="w")
+).grid(row=9, column=0, sticky="w")
 
 thinking_level_cb = ttk.Combobox(
 	card_config,
@@ -269,7 +287,7 @@ thinking_level_cb = ttk.Combobox(
 	width=20,
 )
 thinking_level_cb.set("Minimal")
-thinking_level_cb.grid(row=8, column=0, sticky="ew", pady=(2, 8))
+thinking_level_cb.grid(row=10, column=0, sticky="ew", pady=(2, 8))
 '''
 
 	after_temp_line = """temp_label = tk.Label(
@@ -279,7 +297,7 @@ thinking_level_cb.grid(row=8, column=0, sticky="ew", pady=(2, 8))
 	fg=PALETTE["accent"],
 	font=("Segoe UI", 10, "bold"),
 )
-temp_label.grid(row=6, column=1, padx=(8, 0))
+temp_label.grid(row=8, column=1, padx=(8, 0))
 
 
 def update_temp_label(event=None):
@@ -314,7 +332,7 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)"""
 	if genai is None:
 		messagebox.showerror(
 			"Thiếu thư viện",
-			"Chưa cài thư viện google-generativeai.\\nCài bằng lệnh: pip install google-generativeai",
+			"Chưa cài thư viện google-genai.\\nCài bằng lệnh: pip install google-genai",
 		)
 		return
 
@@ -431,12 +449,12 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)"""
 			"_GemmaPromptFeedback": _GemmaPromptFeedback,
 			"_GemmaUsageMetadata": _GemmaUsageMetadata,
 			"GenerationConfig": GenerationConfig,
-			"GEMMA_BASE_URL": GEMMA_BASE_URL,
-			"GEMMA_MODEL_ID": GEMMA_MODEL_ID,
+			"GEMMA_DEFAULT_MODEL_ID": GEMMA_DEFAULT_MODEL_ID,
 			"GEMMA_SETTINGS_FILENAME": GEMMA_SETTINGS_FILENAME,
 			"GEMMA_HISTORY_FILENAME": GEMMA_HISTORY_FILENAME,
 			"GEMMA_SECRET_SALT": GEMMA_SECRET_SALT,
 			"GEMMA_WINDOW_TITLE": GEMMA_WINDOW_TITLE,
+			"GEMMA_ENABLE_GOOGLE_SEARCH": GEMMA_ENABLE_GOOGLE_SEARCH,
 			"tk": tk,
 			"_init_thinking_level_var": _init_thinking_level_var_placeholder,
 		},
