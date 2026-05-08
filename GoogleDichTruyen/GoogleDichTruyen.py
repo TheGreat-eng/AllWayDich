@@ -191,6 +191,7 @@ def load_settings():
 		"model_fallback_order": "|".join(MODELS),
 		"threads": "3",
 		"chunk_size": str(CHUNK_SIZE),
+		"chunk_split_mode": "keyword",
 		"max_output_tokens": str(MAX_OUTPUT_TOKENS),
 		"scan_char_limit": str(DEFAULT_SCAN_CHAR_LIMIT),
 		"temperature": "0.5",
@@ -226,6 +227,7 @@ def save_settings():
 		"model_fallback_order": model_fallback_order_var.get(),
 		"threads": thread_var.get(),
 		"chunk_size": chunk_size_var.get(),
+		"chunk_split_mode": chunk_split_mode_var.get(),
 		"max_output_tokens": max_output_tokens_var.get(),
 		"scan_char_limit": scan_char_limit_var.get(),
 		"temperature": temp_var.get(),
@@ -252,6 +254,7 @@ def apply_settings(settings):
 	model_fallback_order_var.set(settings.get("model_fallback_order", "|".join(MODELS)))
 	thread_var.set(settings.get("threads", "3"))
 	chunk_size_var.set(settings.get("chunk_size", str(CHUNK_SIZE)))
+	chunk_split_mode_var.set(settings.get("chunk_split_mode", "keyword"))
 	max_output_tokens_var.set(settings.get("max_output_tokens", str(MAX_OUTPUT_TOKENS)))
 	scan_char_limit_var.set(settings.get("scan_char_limit", str(DEFAULT_SCAN_CHAR_LIMIT)))
 	temp_var.set(settings.get("temperature", "0.5"))
@@ -646,16 +649,18 @@ def update_widget_colors(widget):
 
 
 # ================= CHIA CHUNK =================
-def split_text(text, size=CHUNK_SIZE):
+def split_text(text, size=CHUNK_SIZE, split_mode="keyword"):
 	chunks = []
 	current_chunk = ""
 	
 	# Nhận diện chương mới (khớp đầu dòng, không phân biệt hoa/thường).
-	strong_patterns = [
+	keyword_patterns = [
 		r"^\s*(chương|chap(?:ter)?|hồi|quyển|tập|thiên|phần|mục|tiết|ngoại\s*(truyện|chương)|phiên\s*ngoại|đệ\s+\w+\s+chương|thứ\s+\w+\s+chương)\b",
 		r"^\s*(ch\.|chap\.|c\.|q\.|t\.)\s*\d+\b",
 	]
-	strong_matchers = [re.compile(p, re.IGNORECASE) for p in strong_patterns]
+	_equals_pattern = r"^\s*={3,}\s*(thứ\s+\w+\s+chương|chương\s+\w+|chap(?:ter)?\s+\w+|hồi\s+\w+|quyển\s+\w+|tập\s+\w+|thiên\s+\w+|phần\s+\w+|mục\s+\w+|tiết\s+\w+)\b.*(?:={3,}\s*)?$"
+	active_patterns = [_equals_pattern] if split_mode == "equals" else keyword_patterns
+	active_matchers = [re.compile(p, re.IGNORECASE) for p in active_patterns]
 	
 	lines = text.splitlines(True)
 	
@@ -664,7 +669,7 @@ def split_text(text, size=CHUNK_SIZE):
 	current_block = ""
 	
 	for line in lines:
-		if any(matcher.match(line) for matcher in strong_matchers):
+		if any(matcher.match(line) for matcher in active_matchers):
 			if current_block.strip():
 				blocks.append(current_block)
 			current_block = line
@@ -926,7 +931,7 @@ def run_consistency_check():
 			if not translated_text.strip():
 				raise RuntimeError("File output rỗng, không có nội dung để phân tích.")
 
-			chunks = split_text(translated_text, size=analysis_chunk_size)
+			chunks = split_text(translated_text, size=analysis_chunk_size, split_mode=chunk_split_mode_var.get())
 			chunk_blocks = []
 			for idx, chunk in enumerate(chunks, 1):
 				chunk_blocks.append(f"[CHUNK {idx}]\\n{chunk.strip()}\\n[/CHUNK {idx}]")
@@ -1432,7 +1437,7 @@ def process_translation_logic():
 			add_log(f"📚 Áp dụng glossary: {len(glossary_entries)} mục thuật ngữ.")
 
 		with open(in_file, "r", encoding="utf-8") as f:
-			chunks = split_text(f.read(), size=chunk_size)
+			chunks = split_text(f.read(), size=chunk_size, split_mode=chunk_split_mode_var.get())
 
 		total = len(chunks)
 		stats["total_chunks"] = total
@@ -1956,7 +1961,7 @@ def load_and_preview_chunks():
 	try:
 		with open(input_file, "r", encoding="utf-8") as f:
 			text = f.read()
-		previewed_chunks = split_text(text, size_limit)
+		previewed_chunks = split_text(text, size_limit, split_mode=chunk_split_mode_var.get())
 		
 		chunk_listbox.delete(0, tk.END)
 		for i, chunk in enumerate(previewed_chunks):
@@ -2046,6 +2051,7 @@ model_fallback_order_var = tk.StringVar(value="|".join(MODELS))  # Model order f
 fallback_order_hint_var = tk.StringVar(value="Thứ tự fallback hiệu lực: --")
 thread_var = tk.StringVar(value="3")
 chunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))
+chunk_split_mode_var = tk.StringVar(value="keyword")
 max_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))
 scan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))
 temp_var = tk.StringVar(value="0.5")
@@ -2417,11 +2423,46 @@ max_output_tokens_box.grid(row=1, column=2, sticky="ew", padx=(6, 0), pady=(2, 0
 
 tk.Label(
 	card_config,
-	text="Nhiệt độ (0-2)",
+	text="Chia chunk theo",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
 ).grid(row=5, column=0, sticky="w")
+
+split_mode_frame = tk.Frame(card_config, bg=PALETTE["panel"])
+split_mode_frame.grid(row=6, column=0, sticky="w", pady=(2, 8))
+
+tk.Radiobutton(
+	split_mode_frame,
+	text="Dòng === Thứ/Chương ===",
+	variable=chunk_split_mode_var,
+	value="equals",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	selectcolor=PALETTE["panel"],
+	activebackground=PALETTE["panel"],
+	activeforeground=PALETTE["text"],
+).pack(side="left", padx=(0, 12))
+
+tk.Radiobutton(
+	split_mode_frame,
+	text="Từ khóa Thứ/Chương/Chap",
+	variable=chunk_split_mode_var,
+	value="keyword",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	selectcolor=PALETTE["panel"],
+	activebackground=PALETTE["panel"],
+	activeforeground=PALETTE["text"],
+).pack(side="left")
+
+tk.Label(
+	card_config,
+	text="Nhiệt độ (0-2)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=7, column=0, sticky="w")
 temp_scale = ttk.Scale(
 	card_config,
 	from_=0.0,
@@ -2431,7 +2472,7 @@ temp_scale = ttk.Scale(
 	length=200,
 	style="Accent.Horizontal.TScale",
 )
-temp_scale.grid(row=6, column=0, sticky="ew")
+temp_scale.grid(row=8, column=0, sticky="ew")
 temp_label = tk.Label(
 	card_config,
 	textvariable=temp_var,
@@ -2439,7 +2480,7 @@ temp_label = tk.Label(
 	fg=PALETTE["accent"],
 	font=("Segoe UI", 10, "bold"),
 )
-temp_label.grid(row=6, column=1, padx=(8, 0))
+temp_label.grid(row=8, column=1, padx=(8, 0))
 
 
 def update_temp_label(event=None):
