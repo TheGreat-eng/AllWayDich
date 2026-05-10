@@ -20,6 +20,7 @@ GEMMA_HISTORY_FILENAME = "translation_history_gemma.json"
 GEMMA_SECRET_SALT = "GemmaDichTruyenSecretKey2026"
 GEMMA_WINDOW_TITLE = "📖 App Dịch Truyện – Gemma 4 Thinking"
 GEMMA_ENABLE_GOOGLE_SEARCH = True
+GEMMA_DEFAULT_REQUESTS_PER_MINUTE = 60
 
 
 @dataclass
@@ -254,6 +255,16 @@ def _load_and_run_google_app() -> None:
 		f'root.title("{GEMMA_WINDOW_TITLE}")',
 	)
 
+	patched_source = patched_source.replace(
+		"DEFAULT_SCAN_CHAR_LIMIT = 10000",
+		f"DEFAULT_SCAN_CHAR_LIMIT = 10000\nDEFAULT_REQUESTS_PER_MINUTE = {GEMMA_DEFAULT_REQUESTS_PER_MINUTE}",
+	)
+
+	patched_source = patched_source.replace(
+		"pause_event = threading.Event()\npause_event.set()\n\n\n# ================= THỐNG KÊ =================",
+		"pause_event = threading.Event()\npause_event.set()\n\n\n# ================= GIỚI HẠN REQUEST/PHÚT =================\nrate_limit_lock = threading.Lock()\nrate_limit_timestamps = []\n\n\n# ================= THỐNG KÊ =================",
+	)
+
 	gemma_model_list = """[
 	"gemma-4-26b-a4b-it",
 	"gemma-4-31b-it"
@@ -263,9 +274,105 @@ def _load_and_run_google_app() -> None:
 		"MODELS = " + gemma_model_list,
 	)
 	patched_source = patched_source.replace(
+		"model_fallback_order_var = tk.StringVar(value=\"|\".join(MODELS))  # Model order for fallback when quota exceeded",
+		"model_fallback_order_var = tk.StringVar(value=\"\")  # Fallback disabled in Gemma app",
+	)
+	patched_source = patched_source.replace(
+		"fallback_order_hint_var = tk.StringVar(value=\"Thứ tự fallback hiệu lực: --\")",
+		"fallback_order_hint_var = tk.StringVar(value=\"\")",
+	)
+	patched_source = patched_source.replace(
+		"""def get_effective_fallback_order():
+	model = model_var.get().strip()
+	order = [m.strip() for m in model_fallback_order_var.get().split("|") if m.strip()]
+	if not order:
+		return [model] if model else []
+	if model:
+		order = [m for m in order if m != model]
+		order = [model] + order
+	return order
+""",
+		"""def get_effective_fallback_order():
+	model = model_var.get().strip()
+	return [model] if model else []
+""",
+	)
+	patched_source = patched_source.replace(
+		"""def update_fallback_hint(*args):
+	order = get_effective_fallback_order()
+	if order:
+		fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(order)}")
+	else:
+		fallback_order_hint_var.set("Thứ tự fallback hiệu lực: --")
+""",
+		"""def update_fallback_hint(*args):
+	return
+""",
+	)
+	patched_source = patched_source.replace(
+		"""tk.Button(
+	model_frame,
+	text="🔧 Fallback",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=6,
+	command=lambda: open_model_fallback_dialog(),
+).grid(row=0, column=1, sticky="ew")
+
+tk.Label(
+	card_config,
+	textvariable=fallback_order_hint_var,
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 8, "italic"),
+).grid(row=3, column=0, sticky="w", pady=(0, 6))
+""",
+		"",
+	)
+	patched_source = patched_source.replace(
+		"""\t\tmodel_fallback_order_str = model_fallback_order_var.get()
+		model_fallback_order = [m.strip() for m in model_fallback_order_str.split("|") if m.strip()]
+		if not model_fallback_order:
+			model_fallback_order = [model]
+		if model in model_fallback_order:
+			model_fallback_order = [m for m in model_fallback_order if m != model]
+		model_fallback_order = [model] + model_fallback_order
+		if model_fallback_order:
+			fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(model_fallback_order)}")
+			add_log(f"🔄 Model fallback order: {' -> '.join(model_fallback_order)}")
+		cp_file = get_checkpoint_path(in_file)
+""",
+		"""\t\tmodel_fallback_order = [model]
+		cp_file = get_checkpoint_path(in_file)
+""",
+	)
+	patched_source = patched_source.replace(
 		"temp_var = tk.StringVar(value=\"0.5\")",
 		"""temp_var = tk.StringVar(value="0.5")
 thinking_level_var = tk.StringVar(value="Minimal")""",
+	)
+
+	patched_source = patched_source.replace(
+		"\"scan_char_limit\": str(DEFAULT_SCAN_CHAR_LIMIT),\n\t\t\"temperature\": \"0.5\",",
+		"\"scan_char_limit\": str(DEFAULT_SCAN_CHAR_LIMIT),\n\t\t\"requests_per_minute\": str(DEFAULT_REQUESTS_PER_MINUTE),\n\t\t\"temperature\": \"0.5\",",
+	)
+
+	patched_source = patched_source.replace(
+		"\"scan_char_limit\": scan_char_limit_var.get(),\n\t\t\"temperature\": temp_var.get(),",
+		"\"scan_char_limit\": scan_char_limit_var.get(),\n\t\t\"requests_per_minute\": requests_per_min_var.get(),\n\t\t\"temperature\": temp_var.get(),",
+	)
+
+	patched_source = patched_source.replace(
+		"scan_char_limit_var.set(settings.get(\"scan_char_limit\", str(DEFAULT_SCAN_CHAR_LIMIT)))\n\ttemp_var.set(settings.get(\"temperature\", \"0.5\"))",
+		"scan_char_limit_var.set(settings.get(\"scan_char_limit\", str(DEFAULT_SCAN_CHAR_LIMIT)))\n\trequests_per_min_var.set(settings.get(\"requests_per_minute\", str(DEFAULT_REQUESTS_PER_MINUTE)))\n\ttemp_var.set(settings.get(\"temperature\", \"0.5\"))",
+	)
+
+	patched_source = patched_source.replace(
+		"thread_var = tk.StringVar(value=\"3\")\nchunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))\nchunk_split_mode_var = tk.StringVar(value=\"keyword\")\nmax_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))\nscan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))\ntemp_var = tk.StringVar(value=\"0.5\")",
+		"thread_var = tk.StringVar(value=\"3\")\nchunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))\nchunk_split_mode_var = tk.StringVar(value=\"keyword\")\nmax_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))\nscan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))\nrequests_per_min_var = tk.StringVar(value=str(DEFAULT_REQUESTS_PER_MINUTE))\ntemp_var = tk.StringVar(value=\"0.5\")",
 	)
 
 
@@ -313,6 +420,22 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)"""
 	)
 
 	patched_source = patched_source.replace(
+		"max_output_tokens_box = tk.Entry(perf_frame, textvariable=max_output_tokens_var, width=12, **entry_opts)\nmax_output_tokens_box.grid(row=1, column=2, sticky=\"ew\", padx=(6, 0), pady=(2, 0))",
+		"""max_output_tokens_box = tk.Entry(perf_frame, textvariable=max_output_tokens_var, width=12, **entry_opts)
+max_output_tokens_box.grid(row=1, column=2, sticky="ew", padx=(6, 0), pady=(2, 0))
+
+tk.Label(
+	perf_frame,
+	text="Request/phút",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=2, column=0, sticky="w", pady=(6, 0))
+requests_per_min_box = tk.Entry(perf_frame, textvariable=requests_per_min_var, width=8, **entry_opts)
+requests_per_min_box.grid(row=3, column=0, sticky="ew", padx=(0, 6), pady=(2, 0))""",
+	)
+
+	patched_source = patched_source.replace(
 		"def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):\n\tdef _safe_int(value):",
 		"""def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):
 	global thinking_level_var
@@ -320,12 +443,62 @@ temp_scale.bind("<ButtonRelease-1>", update_temp_label)"""
 	selected_level = thinking_level_var.get().strip().lower() if thinking_level_var else "minimal"
 	thinking_level = _level_map.get(selected_level, "MINIMAL")
 	
+	def _get_requests_per_minute():
+		try:
+			return int(requests_per_min_var.get())
+		except Exception:
+			return 0
+
+	def _wait_for_rate_limit():
+		limit = _get_requests_per_minute()
+		if limit <= 0:
+			return
+
+		logged = False
+		while True:
+			if is_stopped:
+				return
+
+			now = time.time()
+			with rate_limit_lock:
+				window_start = now - 60
+				if rate_limit_timestamps:
+					rate_limit_timestamps[:] = [t for t in rate_limit_timestamps if t >= window_start]
+				if len(rate_limit_timestamps) < limit:
+					rate_limit_timestamps.append(now)
+					return
+				oldest = rate_limit_timestamps[0]
+				sleep_for = max(0.0, 60 - (now - oldest))
+
+			if sleep_for > 0:
+				if not logged:
+					add_log(f"⏳ Đang chờ giới hạn request/phút ({limit}/phút)...")
+					logged = True
+				time.sleep(min(sleep_for, 1.0))
+			else:
+				time.sleep(0.05)
+	
 	def _safe_int(value):""",
+	)
+
+	patched_source = patched_source.replace(
+		"try:\n\t\tmodel = genai.GenerativeModel(model_name=model_id)",
+		"try:\n\t\t_wait_for_rate_limit()\n\t\tmodel = genai.GenerativeModel(model_name=model_id)",
 	)
 
 	patched_source = patched_source.replace(
 		"temperature=temperature,\n\t\t\tmax_output_tokens=max_output_tokens,\n\t\t),",
 		"temperature=temperature,\n\t\t\tmax_output_tokens=max_output_tokens,\n\t\t\tthinking_level=thinking_level,\n\t\t),",
+	)
+
+	patched_source = patched_source.replace(
+		"try:\n\t\tmax_output_tokens = int(max_output_tokens_var.get())\n\t\tif max_output_tokens < 256 or max_output_tokens > 65536:\n\t\t\traise ValueError\n\texcept Exception:\n\t\tmessagebox.showerror(\"Lỗi\", \"Max output tokens phải là số nguyên từ 256 đến 65536.\")\n\t\treturn False",
+		"try:\n\t\tmax_output_tokens = int(max_output_tokens_var.get())\n\t\tif max_output_tokens < 256 or max_output_tokens > 65536:\n\t\t\traise ValueError\n\texcept Exception:\n\t\tmessagebox.showerror(\"Lỗi\", \"Max output tokens phải là số nguyên từ 256 đến 65536.\")\n\t\treturn False\n\n\ttry:\n\t\trequests_per_minute = int(requests_per_min_var.get())\n\t\tif requests_per_minute < 1 or requests_per_minute > 600:\n\t\t\traise ValueError\n\texcept Exception:\n\t\tmessagebox.showerror(\"Lỗi\", \"Giới hạn request/phút phải là số nguyên từ 1 đến 600.\")\n\t\treturn False",
+	)
+
+	patched_source = patched_source.replace(
+		"genai.configure(api_key=api_key)\n\toutput_path.set(build_default_output_path(input_path.get()))",
+		"genai.configure(api_key=api_key)\n\twith rate_limit_lock:\n\t\trate_limit_timestamps.clear()\n\toutput_path.set(build_default_output_path(input_path.get()))",
 	)
 
 	test_api_func_code = '''def test_api_connection():
