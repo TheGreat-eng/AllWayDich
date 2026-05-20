@@ -16,7 +16,7 @@ import requests
 API_BASE_URL = "https://llm.chiasegpu.vn/v1/chat/completions"
 
 # Chỉ dùng 1 model theo yêu cầu
-MODELS = ["gpt-5.4", "gemini-3.0-flash"]
+MODELS = ["gpt-5.4", "gemini-3.0-flash", "deepseek-v4-pro"]
 
 CHUNK_SIZE = 3000  # Độ dài mỗi đoạn văn 3000
 MAX_TOKENS = 8192  # Độ dài tối đa câu trả lời
@@ -58,6 +58,7 @@ stats = {
 MODEL_PRICING = {
 	"gpt-5.4": {"input_per_1m": 0.0, "output_per_1m": 0.0},
 	"gemini-3.0-flash": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+	"deepseek-v4-pro": {"input_per_1m": 0.0, "output_per_1m": 0.0},
 }
 
 def get_model_prices_usd_per_1m(model_id):
