@@ -10,11 +10,28 @@ import random
 import base64
 import hashlib
 import re
+import mimetypes
+import webbrowser
 
 try:
 	import google.generativeai as genai
 except ImportError:
 	genai = None
+
+try:
+	from google.oauth2.credentials import Credentials
+	from googleapiclient.discovery import build
+	from googleapiclient.errors import HttpError
+	from googleapiclient.http import MediaFileUpload
+	from google_auth_oauthlib.flow import InstalledAppFlow
+	from google.auth.transport.requests import Request
+except ImportError:
+	Credentials = None
+	build = None
+	HttpError = None
+	MediaFileUpload = None
+	InstalledAppFlow = None
+	Request = None
 
 
 # ================= CẤU HÌNH GEMINI =================
@@ -84,6 +101,9 @@ MODEL_PRICING = {
 }
 
 USD_TO_VND = 27000
+
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+DRIVE_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drive_token.json")
 
 
 # ================= QUOTA & ERROR HANDLING =================
@@ -199,6 +219,9 @@ def load_settings():
 		"prompt": DEFAULT_PROMPT,
 		"glossary": DEFAULT_GLOSSARY,
 		"theme": "dark",
+		"drive_upload_enabled": False,
+		"drive_credentials_path": "",
+		"drive_folder_id": "",
 	}
 
 	try:
@@ -235,6 +258,9 @@ def save_settings():
 		"glossary": glossary_text.get("1.0", tk.END).strip(),
 		"prompt": prompt_text.get("1.0", tk.END).strip(),
 		"theme": current_theme,
+		"drive_upload_enabled": bool(drive_upload_var.get()),
+		"drive_credentials_path": drive_credentials_path_var.get().strip(),
+		"drive_folder_id": drive_folder_id_var.get().strip(),
 	}
 
 	try:
@@ -267,6 +293,9 @@ def apply_settings(settings):
 	prompt_text.insert(tk.END, settings.get("prompt", DEFAULT_PROMPT))
 
 	current_theme = settings.get("theme", "dark")
+	drive_upload_var.set(bool(settings.get("drive_upload_enabled", False)))
+	drive_credentials_path_var.set(settings.get("drive_credentials_path", ""))
+	drive_folder_id_var.set(settings.get("drive_folder_id", ""))
 
 
 def on_closing():
@@ -300,6 +329,51 @@ def build_default_output_path(input_file, model_id=None):
 	)
 
 
+def ensure_drive_dependencies():
+	return all([Credentials, build, MediaFileUpload, InstalledAppFlow, Request])
+
+
+def get_drive_credentials(credentials_path, token_path):
+	if not credentials_path or not os.path.isfile(credentials_path):
+		raise FileNotFoundError("Không tìm thấy file credentials Google Drive.")
+
+	creds = None
+	if token_path and os.path.exists(token_path):
+		creds = Credentials.from_authorized_user_file(token_path, DRIVE_SCOPES)
+
+	if not creds or not creds.valid:
+		if creds and creds.expired and creds.refresh_token:
+			creds.refresh(Request())
+		else:
+			flow = InstalledAppFlow.from_client_secrets_file(credentials_path, DRIVE_SCOPES)
+			creds = flow.run_local_server(port=0)
+		if token_path:
+			with open(token_path, "w", encoding="utf-8") as token_file:
+				token_file.write(creds.to_json())
+
+	return creds
+
+
+def upload_file_to_drive(file_path, credentials_path, folder_id="", token_path=DRIVE_TOKEN_FILE):
+	if not ensure_drive_dependencies():
+		raise RuntimeError("Thiếu thư viện Google Drive API.")
+	if not file_path or not os.path.isfile(file_path):
+		raise FileNotFoundError("Không tìm thấy file output để upload.")
+
+	creds = get_drive_credentials(credentials_path, token_path)
+	service = build("drive", "v3", credentials=creds)
+	mime_type, _ = mimetypes.guess_type(file_path)
+	media = MediaFileUpload(file_path, mimetype=mime_type or "application/octet-stream", resumable=True)
+	metadata = {"name": os.path.basename(file_path)}
+	if folder_id:
+		metadata["parents"] = [folder_id]
+
+	result = service.files().create(body=metadata, media_body=media, fields="id,name,webViewLink").execute()
+	file_id = result.get("id", "")
+	web_link = result.get("webViewLink") or (f"https://drive.google.com/file/d/{file_id}/view" if file_id else "")
+	return file_id, web_link
+
+
 def add_log(message):
 	timestamp = time.strftime("%H:%M:%S")
 	log_message = f"[{timestamp}] {message}\n"
@@ -322,6 +396,93 @@ def add_log(message):
 			pass
 
 	print(log_message.strip())
+
+
+def show_completion_dialog(title, message, drive_link=""):
+	if threading.current_thread() is not threading.main_thread():
+		if "root" in globals() and root.winfo_exists():
+			root.after(0, lambda: show_completion_dialog(title, message, drive_link))
+		return
+
+	win = tk.Toplevel(root)
+	win.title(title)
+	win.configure(bg=PALETTE["panel"])
+	win.transient(root)
+	win.grab_set()
+	win.resizable(False, False)
+
+	container = tk.Frame(win, bg=PALETTE["panel"], padx=16, pady=14)
+	container.pack(fill="both", expand=True)
+
+	msg_label = tk.Label(
+		container,
+		text=message,
+		bg=PALETTE["panel"],
+		fg=PALETTE["text"],
+		justify="left",
+		wraplength=520,
+		font=("Segoe UI", 9),
+	)
+	msg_label.pack(anchor="w")
+
+	if drive_link:
+		link_label = tk.Label(
+			container,
+			text=drive_link,
+			bg=PALETTE["panel"],
+			fg=PALETTE["accent_alt"],
+			cursor="hand2",
+			justify="left",
+			wraplength=520,
+			font=("Segoe UI", 9, "underline"),
+		)
+		link_label.pack(anchor="w", pady=(8, 0))
+		link_label.bind("<Button-1>", lambda _evt: webbrowser.open(drive_link))
+
+	btn_row = tk.Frame(container, bg=PALETTE["panel"])
+	btn_row.pack(fill="x", pady=(12, 0))
+
+	def _copy_link():
+		if not drive_link:
+			return
+		root.clipboard_clear()
+		root.clipboard_append(drive_link)
+
+	if drive_link:
+		tk.Button(
+			btn_row,
+			text="Mở Google Drive",
+			bg=PALETTE["accent_alt"],
+			fg="#0b0f19",
+			bd=0,
+			padx=10,
+			pady=6,
+			command=lambda: webbrowser.open(drive_link),
+		).pack(side="left")
+		tk.Button(
+			btn_row,
+			text="Copy link",
+			bg=PALETTE["ok"],
+			fg="#0b0f19",
+			bd=0,
+			padx=10,
+			pady=6,
+			command=_copy_link,
+		).pack(side="left", padx=(8, 0))
+
+	tk.Button(
+		btn_row,
+		text="OK",
+		bg=PALETTE["accent"],
+		fg="#0b0f19",
+		bd=0,
+		padx=12,
+		pady=6,
+		command=win.destroy,
+	).pack(side="right")
+
+	win.update_idletasks()
+	win.geometry(f"{min(620, win.winfo_reqwidth())}x{win.winfo_reqheight()}")
 
 
 def parse_glossary(raw_text):
@@ -1141,6 +1302,18 @@ def validate_inputs():
 		)
 		return False
 
+	if drive_upload_var.get():
+		if not ensure_drive_dependencies():
+			messagebox.showerror(
+				"Thiếu thư viện",
+				"Chưa cài thư viện Google Drive.\nCài bằng lệnh: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
+			)
+			return False
+		credentials_path = drive_credentials_path_var.get().strip()
+		if not credentials_path or not os.path.isfile(credentials_path):
+			messagebox.showerror("Lỗi", "Vui lòng chọn file credentials Google Drive hợp lệ.")
+			return False
+
 	api_key = api_key_entry.get().strip()
 	if not api_key:
 		messagebox.showerror("Lỗi", "Vui lòng nhập Gemini API Key.")
@@ -1418,6 +1591,8 @@ def process_translation_logic():
 
 	history_status = "error"
 	history_error = ""
+	drive_file_id = ""
+	drive_link = ""
 	in_file = input_path.get()
 	out_file = output_path.get()
 	model = model_var.get()
@@ -1523,6 +1698,21 @@ def process_translation_logic():
 		with open(out_file, "w", encoding="utf-8") as f:
 			f.write("\n\n".join([r for r in results if r is not None]))
 
+		if drive_upload_var.get():
+			try:
+				add_log("☁️ Đang upload file lên Google Drive...")
+				drive_file_id, drive_link = upload_file_to_drive(
+					out_file,
+					drive_credentials_path_var.get().strip(),
+					drive_folder_id_var.get().strip(),
+				)
+				if drive_link:
+					add_log(f"✅ Upload Google Drive thành công: {drive_link}")
+				else:
+					add_log("✅ Upload Google Drive thành công.")
+			except Exception as e:
+				add_log(f"⚠️ Upload Google Drive thất bại: {e}")
+
 		if os.path.exists(cp_file):
 			os.remove(cp_file)
 
@@ -1536,10 +1726,14 @@ def process_translation_logic():
 		add_log(f"💰 Total Cost: ${stats['total_cost_usd']:.4f}")
 		add_log(f"💸 Tổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ")
 		history_status = "completed"
-		messagebox.showinfo(
-			"Hoàn tất",
-			f"Truyện đã được dịch xong!\nThời gian: {format_time(total_time)}\nTổng tiền: ${stats['total_cost_usd']:.4f}\nTổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ\nLưu tại: {out_file}",
+		completion_message = (
+			f"Truyện đã được dịch xong!\n"
+			f"Thời gian: {format_time(total_time)}\n"
+			f"Tổng tiền: ${stats['total_cost_usd']:.4f}\n"
+			f"Tổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ\n"
+			f"Lưu tại: {out_file}"
 		)
+		show_completion_dialog("Hoàn tất", completion_message, drive_link)
 
 	except Exception as e:
 		error_msg = str(e)
@@ -1571,6 +1765,8 @@ def process_translation_logic():
 			"total_output_cost_usd": round(stats["total_output_cost_usd"], 6),
 			"total_cost_usd": round(stats["total_cost_usd"], 6),
 			"total_cost_vnd": int(round(stats["total_cost_usd"] * USD_TO_VND)),
+			"drive_file_id": drive_file_id,
+			"drive_link": drive_link,
 			"error": history_error,
 		}
 		save_translation_history_entry(history_entry)
@@ -2069,6 +2265,9 @@ chunk_split_mode_var = tk.StringVar(value="keyword")
 max_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))
 scan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))
 temp_var = tk.StringVar(value="0.5")
+drive_upload_var = tk.BooleanVar(value=False)
+drive_credentials_path_var = tk.StringVar()
+drive_folder_id_var = tk.StringVar()
 
 def get_effective_fallback_order():
 	model = model_var.get().strip()
@@ -2359,9 +2558,64 @@ tk.Label(
 	card_files,
 	text="Output sẽ tự động lưu cạnh file input theo mẫu: Dich_tên_file_model_yyyy-mm-dd_số_ngẫu_nhiên.txt",
 	bg=PALETTE["panel"],
+	
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9),
 ).grid(row=3, column=0, sticky="w", pady=(6, 0))
+
+tk.Label(
+	card_files,
+	text="Google Drive (tùy chọn)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=4, column=0, sticky="w", pady=(10, 2))
+
+tk.Checkbutton(
+	card_files,
+	text="Tự động upload lên Google Drive sau khi dịch xong",
+	variable=drive_upload_var,
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	selectcolor=PALETTE["panel"],
+	activebackground=PALETTE["panel"],
+	activeforeground=PALETTE["text"],
+).grid(row=5, column=0, sticky="w")
+
+tk.Label(
+	card_files,
+	text="Credentials OAuth (.json)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9),
+).grid(row=6, column=0, sticky="w", pady=(6, 2))
+
+drive_cred_frame = tk.Frame(card_files, bg=PALETTE["panel"])
+drive_cred_frame.grid(row=7, column=0, sticky="ew", pady=(0, 6))
+drive_cred_frame.columnconfigure(0, weight=1)
+tk.Entry(drive_cred_frame, textvariable=drive_credentials_path_var, **entry_opts).grid(row=0, column=0, sticky="ew")
+tk.Button(
+	drive_cred_frame,
+	text="Chọn file",
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=10,
+	pady=6,
+	command=lambda: drive_credentials_path_var.set(
+		filedialog.askopenfilename(filetypes=[("Google OAuth", "*.json")])
+	),
+).grid(row=0, column=1, padx=(8, 0))
+
+tk.Label(
+	card_files,
+	text="Folder ID (tùy chọn)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9),
+).grid(row=8, column=0, sticky="w", pady=(4, 2))
+
+tk.Entry(card_files, textvariable=drive_folder_id_var, **entry_opts).grid(row=9, column=0, sticky="ew")
 
 card_config = build_card(translate_tab, "⚙️ Cấu hình dịch", 1, 2)
 tk.Label(
@@ -2821,6 +3075,8 @@ add_log("📂 Đã tải cài đặt từ lần sử dụng trước.")
 add_log("🔐 API Key được mã hóa khi lưu, chỉ hoạt động trên máy này.")
 if genai is None:
 	add_log("⚠️ Thiếu thư viện google-generativeai. Cài bằng: pip install google-generativeai")
+if not ensure_drive_dependencies():
+	add_log("⚠️ Thiếu thư viện Google Drive. Cài bằng: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
 refresh_history_display()
 try:
 	refresh_cost_stats()

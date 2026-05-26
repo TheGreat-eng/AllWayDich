@@ -52,6 +52,7 @@ tempt/
 # Translation history data and other local runtime JSON files
 **/translation_history*.json
 **/*.resume.json
+**/drive_token.json
 
 # Common secret files
 .env
