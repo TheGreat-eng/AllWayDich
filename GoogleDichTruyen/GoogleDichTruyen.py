@@ -280,11 +280,24 @@ def get_checkpoint_path(input_file):
 	return f"{base_name}.resume.json"
 
 
-def build_default_output_path(input_file):
+def sanitize_filename_part(raw_value, fallback):
+	if not raw_value:
+		return fallback
+	cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(raw_value).strip())
+	cleaned = re.sub(r"-+", "-", cleaned).strip("-")
+	return cleaned or fallback
+
+
+def build_default_output_path(input_file, model_id=None):
 	input_dir = os.path.dirname(input_file)
 	input_name = os.path.splitext(os.path.basename(input_file))[0]
 	random_suffix = random.randint(1000, 9999)
-	return os.path.join(input_dir, f"Dich_{input_name}_{random_suffix}.txt")
+	model_token = sanitize_filename_part(model_id, "model")
+	date_token = datetime.datetime.now().strftime("%Y-%m-%d")
+	return os.path.join(
+		input_dir,
+		f"Dich_{input_name}_{model_token}_{date_token}_{random_suffix}.txt",
+	)
 
 
 def add_log(message):
@@ -1363,7 +1376,7 @@ def start_translation():
 
 	api_key = api_key_entry.get().strip()
 	genai.configure(api_key=api_key)
-	output_path.set(build_default_output_path(input_path.get()))
+	output_path.set(build_default_output_path(input_path.get(), model_var.get()))
 	add_log(f"📄 File output mặc định: {output_path.get()}")
 
 	save_settings()
@@ -2344,7 +2357,7 @@ tk.Button(
 
 tk.Label(
 	card_files,
-	text="Output sẽ tự động lưu cạnh file input theo mẫu: Dich_tên_file_số_ngẫu_nhiên.txt",
+	text="Output sẽ tự động lưu cạnh file input theo mẫu: Dich_tên_file_model_yyyy-mm-dd_số_ngẫu_nhiên.txt",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9),
