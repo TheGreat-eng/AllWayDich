@@ -583,9 +583,47 @@ def save_translation_history_entry(entry, max_entries=200):
 		print(f"Không thể lưu lịch sử dịch: {e}")
 
 
+history_display_map = {}
+
+
+def show_history_entry_dialog(entry):
+	status = str(entry.get("status", "--")).upper()
+	start_at = entry.get("start_at", "--")
+	end_at = entry.get("end_at", "--")
+	duration_seconds = entry.get("duration_seconds", 0)
+	output_file = entry.get("output_file", "")
+	total_cost = float(entry.get("total_cost_usd", 0.0) or 0.0)
+	total_cost_vnd = float(entry.get("total_cost_vnd", total_cost * USD_TO_VND) or 0.0)
+	drive_link = entry.get("drive_link", "")
+
+	message = (
+		f"Trạng thái: {status}\n"
+		f"Bắt đầu: {start_at}\n"
+		f"Kết thúc: {end_at}\n"
+		f"Thời gian: {format_time(duration_seconds)}\n"
+		f"Tổng tiền: ${total_cost:.4f}\n"
+		f"Tổng tiền Việt: {int(round(total_cost_vnd)):,} đ\n"
+		f"Lưu tại: {output_file}"
+	)
+	show_completion_dialog("Lịch sử dịch", message, drive_link)
+
+
+def on_history_row_click(event):
+	if "history_table" not in globals():
+		return
+	row_id = history_table.identify_row(event.y)
+	if not row_id:
+		return
+	entry = history_display_map.get(row_id)
+	if entry:
+		show_history_entry_dialog(entry)
+
+
 def refresh_history_display():
 	if "history_table" not in globals():
 		return
+
+	history_display_map.clear()
 
 	history = load_translation_history()
 	for row_id in history_table.get_children():
@@ -624,7 +662,7 @@ def refresh_history_display():
 			row_tag = "even" if idx % 2 == 0 else "odd"
 			status_tag = f"status_{status.lower()}"
 
-			history_table.insert(
+			row_id = history_table.insert(
 				"",
 				tk.END,
 				values=(
@@ -643,6 +681,7 @@ def refresh_history_display():
 				),
 				tags=(row_tag, status_tag),
 			)
+			history_display_map[row_id] = item
 
 
 def clear_translation_history():
@@ -3015,6 +3054,7 @@ history_columns = (
 
 history_table = ttk.Treeview(history_table_frame, columns=history_columns, show="headings", style="History.Treeview")
 history_table.grid(row=0, column=0, sticky="nsew")
+history_table.bind("<ButtonRelease-1>", on_history_row_click)
 
 history_scroll_y = ttk.Scrollbar(history_table_frame, orient="vertical", command=history_table.yview)
 history_scroll_y.grid(row=0, column=1, sticky="ns")
