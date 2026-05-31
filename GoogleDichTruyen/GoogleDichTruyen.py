@@ -88,6 +88,7 @@ stats = {
 
 
 MODEL_PRICING = {
+	"gemini-3.5-flash": {"input_per_1m": 1.50, "output_per_1m": 9.00},
 	"gemini-3.1-pro-preview": {
 		"input_per_1m_le_200k": 2.00,
 		"input_per_1m_gt_200k": 4.00,
@@ -584,6 +585,11 @@ def save_translation_history_entry(entry, max_entries=200):
 
 
 history_display_map = {}
+request_display_map = {}
+request_detail_tabs = {}
+request_detail_tables = {}
+request_minute_counts = {}
+request_minute_lock = threading.Lock()
 
 
 def show_history_entry_dialog(entry):
@@ -683,6 +689,11 @@ def refresh_history_display():
 			)
 			history_display_map[row_id] = item
 
+	try:
+		refresh_request_stats_display()
+	except NameError:
+		pass
+
 
 def clear_translation_history():
 	if not messagebox.askyesno("Xác nhận", "Bạn có chắc muốn xóa toàn bộ lịch sử dịch?"):
@@ -693,12 +704,258 @@ def clear_translation_history():
 			json.dump([], f, ensure_ascii=False, indent=2)
 		refresh_history_display()
 		try:
+			refresh_request_stats_display()
+		except NameError:
+			pass
+		try:
 			refresh_cost_stats()
 		except NameError:
 			pass
 		add_log("🧹 Đã xóa toàn bộ lịch sử dịch.")
 	except Exception as e:
 		messagebox.showerror("Lỗi", f"Không thể xóa lịch sử dịch: {e}")
+
+
+def reset_request_metrics():
+	with request_minute_lock:
+		request_minute_counts.clear()
+
+
+def record_request_event(model_id=None):
+	minute_key = time.strftime("%Y-%m-%d %H:%M")
+	model_key = str(model_id or "unknown")
+	with request_minute_lock:
+		if minute_key not in request_minute_counts:
+			request_minute_counts[minute_key] = {}
+		request_minute_counts[minute_key][model_key] = request_minute_counts[minute_key].get(model_key, 0) + 1
+
+
+def get_request_metrics_snapshot():
+	with request_minute_lock:
+		minute_items = sorted(request_minute_counts.items())
+	result = []
+	for minute, model_counts in minute_items:
+		if isinstance(model_counts, dict):
+			for model_name, count in sorted(model_counts.items()):
+				result.append({"minute": minute, "model": str(model_name), "count": int(count or 0)})
+		else:
+			result.append({"minute": minute, "model": "unknown", "count": int(model_counts or 0)})
+	return result
+
+
+def build_request_entry_key(entry):
+	start_at = str(entry.get("start_at", ""))
+	output_file = str(entry.get("output_file", ""))
+	model = str(entry.get("model", ""))
+	return f"{start_at}|{output_file}|{model}"
+
+
+def normalize_request_counts(entry):
+	raw = entry.get("request_counts_by_minute", [])
+	items = []
+	if isinstance(raw, dict):
+		for minute, count in raw.items():
+			items.append({"minute": str(minute), "model": str(entry.get("model", "unknown")), "count": int(count or 0)})
+	elif isinstance(raw, list):
+		for item in raw:
+			if not isinstance(item, dict):
+				continue
+			minute = item.get("minute")
+			if minute is None:
+				continue
+			items.append({
+				"minute": str(minute),
+				"model": str(item.get("model", entry.get("model", "unknown"))),
+				"count": int(item.get("count", 0) or 0),
+			})
+	items.sort(key=lambda x: (x["minute"], x["model"]))
+	return items
+
+
+def summarize_request_counts(counts):
+	total_requests = sum(item["count"] for item in counts)
+	minute_totals = {}
+	model_totals = {}
+	for item in counts:
+		minute = item["minute"]
+		model = item.get("model", "unknown")
+		minute_totals[minute] = minute_totals.get(minute, 0) + item["count"]
+		model_totals[model] = model_totals.get(model, 0) + item["count"]
+	peak_requests_per_minute = max(minute_totals.values(), default=0)
+	return total_requests, peak_requests_per_minute, model_totals
+
+
+def open_request_detail_tab(entry):
+	if "tabs" not in globals():
+		return
+
+	key = build_request_entry_key(entry)
+	if key in request_detail_tabs:
+		tabs.select(request_detail_tabs[key])
+		return
+
+	start_at = entry.get("start_at", "--")
+	status = str(entry.get("status", "--")).upper()
+	model = entry.get("model", "--")
+	duration = format_time(entry.get("duration_seconds", 0))
+	counts = normalize_request_counts(entry)
+	default_total, default_peak, model_totals = summarize_request_counts(counts)
+	total_requests = int(entry.get("total_requests", default_total) or 0)
+	peak_rpm = int(entry.get("peak_requests_per_minute", default_peak) or 0)
+	model_summary = ", ".join([f"{name}: {count:,}" for name, count in sorted(model_totals.items())]) or model
+
+	detail_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+	tab_title = f"🕒 Request {start_at}"
+	tabs.add(detail_tab, text=tab_title)
+
+	request_detail_tabs[key] = detail_tab
+	request_detail_tables[key] = None
+
+	detail_tab.columnconfigure(0, weight=1)
+	detail_tab.rowconfigure(1, weight=1)
+
+	toolbar = tk.Frame(detail_tab, bg=PALETTE["panel"])
+	toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+	toolbar.columnconfigure(0, weight=1)
+
+	summary_text = (
+		f"Bắt đầu: {start_at} | Trạng thái: {status} | "
+		f"Model: {model_summary} | Tổng request: {total_requests:,} | "
+		f"Peak/phút: {peak_rpm:,} | Thời gian: {duration}"
+	)
+	request_summary_label = tk.Label(
+		toolbar,
+		text=summary_text,
+		bg=PALETTE["panel"],
+		fg="#000000",
+		font=("Segoe UI", 9),
+	)
+	request_summary_label.grid(row=0, column=0, sticky="w", padx=8, pady=6)
+
+	def _close_request_tab():
+		if key in request_detail_tabs:
+			request_detail_tabs.pop(key, None)
+			request_detail_tables.pop(key, None)
+			try:
+				tabs.forget(detail_tab)
+			except Exception:
+				pass
+			try:
+				detail_tab.destroy()
+			except Exception:
+				pass
+
+	close_btn = tk.Button(
+		toolbar,
+		text="❌ Đóng tab",
+		font=("Segoe UI", 9, "bold"),
+		bg=PALETTE["warn"],
+		fg="#0b0f19",
+		bd=0,
+		padx=10,
+		pady=5,
+		command=_close_request_tab,
+	)
+	close_btn.grid(row=0, column=1, padx=8, pady=4)
+
+	table_frame = tk.Frame(detail_tab, bg=PALETTE["panel"])
+	table_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+	table_frame.columnconfigure(0, weight=1)
+	table_frame.rowconfigure(0, weight=1)
+
+	columns = ("minute", "model", "count")
+	request_detail_table = ttk.Treeview(
+		table_frame,
+		columns=columns,
+		show="headings",
+		style="History.Treeview",
+	)
+	request_detail_table.grid(row=0, column=0, sticky="nsew")
+
+	request_detail_table.heading("minute", text="Phút")
+	request_detail_table.heading("model", text="Model")
+	request_detail_table.heading("count", text="Số request")
+	request_detail_table.column("minute", width=180, anchor="w")
+	request_detail_table.column("model", width=200, anchor="w")
+	request_detail_table.column("count", width=120, anchor="e")
+	request_detail_table.tag_configure("odd", background=PALETTE["input_bg"])
+	request_detail_table.tag_configure("even", background=PALETTE["panel"])
+
+	scroll_y = ttk.Scrollbar(table_frame, orient="vertical", command=request_detail_table.yview)
+	scroll_y.grid(row=0, column=1, sticky="ns")
+	request_detail_table.configure(yscrollcommand=scroll_y.set)
+
+	request_detail_tables[key] = request_detail_table
+
+	if not counts:
+		request_detail_table.insert("", tk.END, values=("Chưa có dữ liệu", "--", "0"), tags=("odd",))
+	else:
+		for idx, item in enumerate(counts, 1):
+			row_tag = "even" if idx % 2 == 0 else "odd"
+			request_detail_table.insert(
+				"",
+				tk.END,
+				values=(item["minute"], item.get("model", "unknown"), f"{item['count']:,}"),
+				tags=(row_tag,),
+			)
+
+	tabs.select(detail_tab)
+
+
+def on_request_row_click(event):
+	if "requests_table" not in globals():
+		return
+	row_id = requests_table.identify_row(event.y)
+	if not row_id:
+		return
+	entry = request_display_map.get(row_id)
+	if entry:
+		open_request_detail_tab(entry)
+
+
+def refresh_request_stats_display():
+	if "requests_table" not in globals():
+		return
+
+	request_display_map.clear()
+	for row_id in requests_table.get_children():
+		requests_table.delete(row_id)
+
+	history = load_translation_history()
+	if not history:
+		requests_hint_var.set("Chưa có lịch sử dịch.")
+		return
+
+	requests_hint_var.set("Hiển thị danh sách bản dịch (nhấn để xem request/phút).")
+	for idx, item in enumerate(reversed(history), 1):
+		start_at = item.get("start_at", "--")
+		status = str(item.get("status", "--")).upper()
+		model = item.get("model", "--")
+		duration = format_time(item.get("duration_seconds", 0))
+		counts = normalize_request_counts(item)
+		default_total, default_peak, _ = summarize_request_counts(counts)
+		total_requests = int(item.get("total_requests", default_total) or 0)
+		peak_rpm = int(item.get("peak_requests_per_minute", default_peak) or 0)
+		in_file = os.path.basename(item.get("input_file", ""))
+		out_file = os.path.basename(item.get("output_file", ""))
+		row_tag = "even" if idx % 2 == 0 else "odd"
+		status_tag = f"status_{status.lower()}"
+
+		row_id = requests_table.insert(
+			"",
+			tk.END,
+			values=(
+				start_at,
+				status,
+				model,
+				f"{total_requests:,}",
+				f"{peak_rpm:,}",
+				duration,
+				f"{in_file} → {out_file}",
+			),
+			tags=(row_tag, status_tag),
+		)
+		request_display_map[row_id] = item
 
 
 def update_stats_display():
@@ -800,6 +1057,20 @@ def apply_theme():
 		history_table.tag_configure("status_stopped", foreground="#000000")
 		history_table.tag_configure("status_error", foreground="#000000")
 
+	if "requests_table" in globals():
+		requests_table.tag_configure("odd", background=PALETTE["input_bg"])
+		requests_table.tag_configure("even", background=PALETTE["panel"])
+		requests_table.tag_configure("status_completed", foreground="#000000")
+		requests_table.tag_configure("status_stopped", foreground="#000000")
+		requests_table.tag_configure("status_error", foreground="#000000")
+
+	if "request_detail_tables" in globals():
+		for table in request_detail_tables.values():
+			if not table:
+				continue
+			table.tag_configure("odd", background=PALETTE["input_bg"])
+			table.tag_configure("even", background=PALETTE["panel"])
+
 	if "consistency_table" in globals():
 		consistency_table.tag_configure("odd", background=PALETTE["input_bg"])
 		consistency_table.tag_configure("even", background=PALETTE["panel"])
@@ -810,6 +1081,9 @@ def apply_theme():
 
 	if "history_hint_label" in globals():
 		history_hint_label.configure(bg=PALETTE["panel"], fg="#000000")
+
+	if "requests_hint_label" in globals():
+		requests_hint_label.configure(bg=PALETTE["panel"], fg="#000000")
 
 	if "consistency_hint_label" in globals():
 		consistency_hint_label.configure(bg=PALETTE["panel"], fg=PALETTE["text_muted"])
@@ -1253,7 +1527,7 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 		try:
 			current_model = model_fallback_order[current_model_index] if current_model_index < len(model_fallback_order) else model_fallback_order[0]
 			add_log(f"⏳ Đang dịch đoạn {index + 1} (model: {current_model})... (lần thử {attempt + 1}/{retries})")
-			
+			record_request_event(current_model)
 			translated_text, input_tokens, output_tokens, error_code = translate_with_gemini(current_model, prompt, chunk, temperature, max_output_tokens)
 			
 			if error_code == 'QUOTA':
@@ -1627,6 +1901,7 @@ def process_translation_logic():
 	stats["total_input_cost_usd"] = 0.0
 	stats["total_output_cost_usd"] = 0.0
 	stats["total_cost_usd"] = 0.0
+	reset_request_metrics()
 
 	history_status = "error"
 	history_error = ""
@@ -1783,6 +2058,8 @@ def process_translation_logic():
 	finally:
 		end_time = time.time()
 		duration_seconds = max(0, int(end_time - stats["start_time"])) if stats["start_time"] else 0
+		request_metrics = get_request_metrics_snapshot()
+		total_requests, peak_requests_per_minute, _ = summarize_request_counts(request_metrics)
 		history_entry = {
 			"engine": "Google Gemini",
 			"status": history_status,
@@ -1804,12 +2081,19 @@ def process_translation_logic():
 			"total_output_cost_usd": round(stats["total_output_cost_usd"], 6),
 			"total_cost_usd": round(stats["total_cost_usd"], 6),
 			"total_cost_vnd": int(round(stats["total_cost_usd"] * USD_TO_VND)),
+			"request_counts_by_minute": request_metrics,
+			"total_requests": total_requests,
+			"peak_requests_per_minute": peak_requests_per_minute,
 			"drive_file_id": drive_file_id,
 			"drive_link": drive_link,
 			"error": history_error,
 		}
 		save_translation_history_entry(history_entry)
 		refresh_history_display()
+		try:
+			refresh_request_stats_display()
+		except NameError:
+			pass
 		try:
 			refresh_cost_stats()
 		except NameError:
@@ -2012,12 +2296,14 @@ main_frame.rowconfigure(1, weight=1)
 translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 preview_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 history_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+requests_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 stats_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 consistency_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 tabs.add(translate_tab, text="🚀 Dịch truyện")
 tabs.add(preview_tab, text="🔍 Xem Chunk")
 tabs.add(consistency_tab, text="🧭 Kiểm tra xưng hô")
 tabs.add(history_tab, text="🗂️ Lịch sử dịch")
+tabs.add(requests_tab, text="📈 Request/phút")
 tabs.add(stats_tab, text="💰 Thống kê chi phí")
 
 for col in range(2):
@@ -2025,6 +2311,8 @@ for col in range(2):
 
 history_tab.columnconfigure(0, weight=1)
 history_tab.rowconfigure(1, weight=1)
+requests_tab.columnconfigure(0, weight=1)
+requests_tab.rowconfigure(1, weight=1)
 consistency_tab.columnconfigure(0, weight=1)
 consistency_tab.rowconfigure(1, weight=1)
 
@@ -3096,6 +3384,74 @@ history_table.tag_configure("status_error", foreground="#000000")
 
 card_history.rowconfigure(2, weight=1)
 
+card_requests = build_card(requests_tab, "📈 Request / phút", 0, 0, colspan=1)
+requests_toolbar = tk.Frame(card_requests, bg=PALETTE["panel"])
+requests_toolbar.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+requests_toolbar.columnconfigure(0, weight=1)
+requests_hint_var = tk.StringVar(value="Hiển thị danh sách bản dịch (nhấn để xem request/phút).")
+requests_hint_label = tk.Label(requests_toolbar, textvariable=requests_hint_var, bg=PALETTE["panel"], fg="#000000", font=("Segoe UI", 9))
+requests_hint_label.grid(row=0, column=0, sticky="w")
+tk.Button(
+	requests_toolbar,
+	text="🔄 Làm mới",
+	font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=10,
+	pady=5,
+	command=refresh_request_stats_display,
+).grid(row=0, column=1, padx=(8, 0))
+
+requests_table_frame = tk.Frame(card_requests, bg=PALETTE["panel"])
+requests_table_frame.grid(row=2, column=0, sticky="nsew")
+requests_table_frame.columnconfigure(0, weight=1)
+requests_table_frame.rowconfigure(0, weight=1)
+
+requests_columns = (
+	"start_at",
+	"status",
+	"model",
+	"total_requests",
+	"peak_rpm",
+	"duration",
+	"files",
+)
+
+requests_table = ttk.Treeview(requests_table_frame, columns=requests_columns, show="headings", style="History.Treeview")
+requests_table.grid(row=0, column=0, sticky="nsew")
+requests_table.bind("<ButtonRelease-1>", on_request_row_click)
+
+requests_scroll_y = ttk.Scrollbar(requests_table_frame, orient="vertical", command=requests_table.yview)
+requests_scroll_y.grid(row=0, column=1, sticky="ns")
+requests_scroll_x = ttk.Scrollbar(requests_table_frame, orient="horizontal", command=requests_table.xview)
+requests_scroll_x.grid(row=1, column=0, sticky="ew")
+requests_table.configure(yscrollcommand=requests_scroll_y.set, xscrollcommand=requests_scroll_x.set)
+
+requests_table.heading("start_at", text="Bắt đầu")
+requests_table.heading("status", text="Trạng thái")
+requests_table.heading("model", text="Model")
+requests_table.heading("total_requests", text="Tổng request")
+requests_table.heading("peak_rpm", text="Peak/phút")
+requests_table.heading("duration", text="Thời gian")
+requests_table.heading("files", text="File")
+
+requests_table.column("start_at", width=145, anchor="w")
+requests_table.column("status", width=95, anchor="center")
+requests_table.column("model", width=180, anchor="w")
+requests_table.column("total_requests", width=120, anchor="e")
+requests_table.column("peak_rpm", width=110, anchor="e")
+requests_table.column("duration", width=90, anchor="center")
+requests_table.column("files", width=360, anchor="w")
+
+requests_table.tag_configure("odd", background=PALETTE["input_bg"])
+requests_table.tag_configure("even", background=PALETTE["panel"])
+requests_table.tag_configure("status_completed", foreground="#000000")
+requests_table.tag_configure("status_stopped", foreground="#000000")
+requests_table.tag_configure("status_error", foreground="#000000")
+
+card_requests.rowconfigure(2, weight=1)
+
 for i in range(6):
 	translate_tab.rowconfigure(i, weight=1 if i in [3, 5] else 0)
 
@@ -3118,6 +3474,10 @@ if genai is None:
 if not ensure_drive_dependencies():
 	add_log("⚠️ Thiếu thư viện Google Drive. Cài bằng: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
 refresh_history_display()
+try:
+	refresh_request_stats_display()
+except NameError:
+	pass
 try:
 	refresh_cost_stats()
 except NameError:
