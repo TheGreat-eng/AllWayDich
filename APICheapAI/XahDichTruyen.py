@@ -12,11 +12,12 @@ import datetime
 import re
 import requests
 
-# ================= CẤU HÌNH CHIASEGPU =================
-API_BASE_URL = "https://llm.chiasegpu.vn/v1/chat/completions"
+# ================= CẤU HÌNH XAH API =================
+API_BASE_URL = "https://api.xah.io/v1/chat/completions"
+API_KEY = "sk-d550a12461017a360f1c942f4271eae296bd6f10aca64c15d70847e46e6caf3c"
 
-# Chỉ dùng 1 model theo yêu cầu
-MODELS = ["gpt-5.4", "gemini-3.0-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "deepseek-v4-flash", "qwen3.7-max"]
+# Model từ Xah API
+MODELS = ["phuocanh421994/Qwen3.7-Plus (Đại hạ giá)"]
 
 CHUNK_SIZE = 3000  # Độ dài mỗi đoạn văn 3000
 MAX_TOKENS = 8192  # Độ dài tối đa câu trả lời
@@ -54,14 +55,9 @@ stats = {
 	"total_cost_usd": 0.0,
 }
 
-# Giá token (USD / 1M token). Nếu nhà cung cấp không công bố thì để 0.
+# Giá token (USD / 1M token). Xah API chưa công bố rõ ràng nên để 0 tạm thời
 MODEL_PRICING = {
-	"gpt-5.4": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-	"gemini-3.0-flash": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-	"gemini-3.1-flash-lite": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-	"gemini-2.5-flash-lite": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-	"deepseek-v4-flash": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-	"qwen3.7-max": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+	"phuocanh421994/Qwen3.7-Plus (Đại hạ giá)": {"input_per_1m": 0.0, "output_per_1m": 0.0},
 }
 
 def get_model_prices_usd_per_1m(model_id):
@@ -140,8 +136,8 @@ def decrypt_api_key(encrypted_key: str) -> str:
 	return xor_decrypt(encrypted_key, get_machine_key())
 
 # ================= CẤU HÌNH LƯU TRỮ CÀI ĐẶT =================
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings.json")
-HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_history.json")
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings_xah.json")
+HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_history_xah.json")
 
 def load_settings():
 	"""Tải cài đặt từ file JSON"""
@@ -168,7 +164,7 @@ def load_settings():
 				if saved_settings.get("api_key_encrypted"):
 					default_settings["api_key"] = decrypt_api_key(saved_settings["api_key_encrypted"])
 				else:
-					default_settings["api_key"] = ""
+					default_settings["api_key"] = API_KEY
 	except Exception as e:
 		print(f"Không thể tải cài đặt: {e}")
 
@@ -176,7 +172,7 @@ def load_settings():
 
 def save_settings():
 	"""Lưu cài đặt hiện tại vào file JSON (API Key được mã hóa)"""
-	api_key = api_key_entry.get().strip()
+	api_key = api_key_entry.get().strip() or API_KEY
 
 	settings = {
 		"api_key_encrypted": encrypt_api_key(api_key),  # Mã hóa API Key
@@ -202,7 +198,7 @@ def apply_settings(settings):
 	"""Áp dụng cài đặt đã lưu vào giao diện"""
 	global current_theme
 
-	api_key_entry.insert(0, settings.get("api_key", ""))
+	api_key_entry.insert(0, settings.get("api_key", API_KEY))
 	input_path.set(settings.get("input_file", ""))
 	output_path.set(settings.get("output_file", ""))
 	model_var.set(settings.get("model", MODELS[0]))
@@ -227,13 +223,13 @@ def on_closing():
 def get_checkpoint_path(input_file):
 	"""Tạo đường dẫn file checkpoint từ file đầu vào"""
 	base_name = os.path.splitext(input_file)[0]
-	return f"{base_name}.resume.json"
+	return f"{base_name}.resume_xah.json"
 
 def build_default_output_path(input_file):
 	input_dir = os.path.dirname(input_file)
 	input_name = os.path.splitext(os.path.basename(input_file))[0]
 	random_suffix = random.randint(1000, 9999)
-	return os.path.join(input_dir, f"Dich_{input_name}_{random_suffix}.txt")
+	return os.path.join(input_dir, f"Dich_Xah_{input_name}_{random_suffix}.txt")
 
 def add_log(message):
 	"""Thêm log vào ô log (nếu có) hoặc in ra console"""
@@ -672,12 +668,6 @@ def start_translation():
 	is_paused = False
 	pause_event.set()
 
-	# Kiểm tra API Key
-	api_key = api_key_entry.get().strip()
-	if not api_key.startswith("sk-"):
-		messagebox.showerror("Lỗi", "Vui lòng nhập API Key hợp lệ (bắt đầu bằng sk-).")
-		return
-
 	# Kiểm tra file đầu vào
 	if not input_path.get():
 		messagebox.showerror("Lỗi", "Vui lòng chọn file truyện đầu vào.")
@@ -761,7 +751,7 @@ def process_translation_logic():
 		max_output_tokens = int(max_output_tokens_var.get())
 		temperature = float(temp_var.get())
 		prompt = prompt_text.get("1.0", tk.END).strip()
-		api_key = api_key_entry.get().strip()
+		api_key = api_key_entry.get().strip() or API_KEY
 
 		# Đọc nội dung file
 		with open(in_file, "r", encoding="utf-8") as f:
@@ -853,7 +843,7 @@ def process_translation_logic():
 		end_time = time.time()
 		duration_seconds = max(0, int(end_time - stats["start_time"])) if stats["start_time"] else 0
 		history_entry = {
-			"engine": "ChiaSeGPU",
+			"engine": "Xah API",
 			"status": history_status,
 			"start_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["start_time"] if stats["start_time"] else end_time)),
 			"end_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_time)),
@@ -889,9 +879,9 @@ def process_translation_logic():
 
 # ================= GUI (Giao diện) =================
 root = tk.Tk()
-root.title("📖 App Dịch Truyện – ChiaSeGPU (gpt-5.4)")
+root.title("📖 App Dịch Truyện – Xah AI (Qwen3.7-Plus)")
 root.geometry("1100x950")
-root.minsize(800, 600)  # Giảm minsize để có thể thu nhỏ hơn
+root.minsize(800, 600)
 
 root.configure(bg=PALETTE["bg"])
 
@@ -997,538 +987,255 @@ header_top.pack(fill="x")
 header_title_frame = tk.Frame(header_top, bg=PALETTE["bg"])
 header_title_frame.pack(side="left", fill="both", expand=True)
 
-ttk.Label(header_title_frame, text="App Dịch Truyện – ChiaSeGPU", style="Header.TLabel").pack(anchor="w")
-ttk.Label(header_title_frame, text="Trải nghiệm dịch mượt, rõ ràng và có thể resume bất cứ lúc nào.", style="SubHeader.TLabel").pack(anchor="w", pady=(4, 6))
+ttk.Label(header_title_frame, text="App Dịch Truyện – Xah AI", style="Header.TLabel").pack(anchor="w")
+ttk.Label(header_title_frame, text="Model: Qwen3.7-Plus (Đại hạ giá)", style="SubHeader.TLabel").pack(anchor="w", pady=(0, 10))
 
-# Nút chuyển theme
-btn_theme = tk.Button(header_top, text="🌙 Tối", font=("Segoe UI", 10, "bold"),
-					  bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=15, pady=8,
-					  command=toggle_theme, cursor="hand2")
-btn_theme.pack(side="right", padx=(10, 0))
+header_btn_frame = tk.Frame(header_top, bg=PALETTE["bg"])
+header_btn_frame.pack(side="right", fill="x")
+
+btn_theme = tk.Button(header_btn_frame, text="🌙 Tối", command=toggle_theme, bg="#374151", fg=PALETTE["text"], font=("Segoe UI", 9, "bold"), cursor="hand2")
+btn_theme.pack(side="right", padx=5)
 
 badge_row = tk.Frame(header, bg=PALETTE["bg"])
-badge_row.pack(anchor="w", pady=(4, 0))
-for text, color in [("ChiaSeGPU API", PALETTE["accent"]), ("gpt-5.4", PALETTE["accent_alt"])]:
-	tk.Label(badge_row, text=text, bg=color, fg="#0b0f19", font=("Segoe UI", 9, "bold"), padx=10, pady=4, bd=0).pack(side="left", padx=(0, 8))
+badge_row.pack(fill="x", pady=(0, 10))
 
-def build_card(parent, title, col, row, colspan=1, rowspan=1):
-	card = ttk.Frame(parent, style="Card.TFrame")
-	card.grid(row=row, column=col, columnspan=colspan, rowspan=rowspan, sticky="nsew", padx=6, pady=6, ipadx=8, ipady=8)
-	card.columnconfigure(0, weight=1)
-	tk.Label(card, text=title, bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 8))
-	return card
+# Section: Cài đặt API
+section1 = ttk.Frame(main_frame, style="Card.TFrame")
+section1.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
 
-tabs = ttk.Notebook(main_frame)
-tabs.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 6))
-main_frame.rowconfigure(1, weight=1)
+ttk.Label(section1, text="⚙️ API & File", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 5))
 
-translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
-preview_tab = tk.Frame(tabs, bg=PALETTE["bg"])
-history_tab = tk.Frame(tabs, bg=PALETTE["bg"])
-stats_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+# Hàng API Key
+api_frame = tk.Frame(section1, bg=PALETTE["panel"])
+api_frame.pack(fill="x", padx=10, pady=5)
 
-tabs.add(translate_tab, text="🚀 Dịch truyện")
-tabs.add(preview_tab, text="👀 Xem Chunk")
-tabs.add(history_tab, text="🗂️ Lịch sử dịch")
-tabs.add(stats_tab, text="💰 Thống kê chi phí")
+ttk.Label(api_frame, text="API Key:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 10))
+api_key_entry = tk.Entry(api_frame, font=("Segoe UI", 10), bg=PALETTE["input_bg"], fg=PALETTE["text"], insertbackground=PALETTE["accent"])
+api_key_entry.pack(side="left", fill="x", expand=True)
 
-for col in range(2):
-	translate_tab.columnconfigure(col, weight=1)
+# Hàng Input File
+input_frame = tk.Frame(section1, bg=PALETTE["panel"])
+input_frame.pack(fill="x", padx=10, pady=5)
 
-history_tab.columnconfigure(0, weight=1)
-history_tab.rowconfigure(1, weight=1)
-
+ttk.Label(input_frame, text="File đầu vào:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 10))
 input_path = tk.StringVar()
+input_entry = tk.Entry(input_frame, textvariable=input_path, font=("Segoe UI", 10), bg=PALETTE["input_bg"], fg=PALETTE["text"], insertbackground=PALETTE["accent"])
+input_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+def select_input_file():
+	file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+	if file_path:
+		input_path.set(file_path)
+
+tk.Button(input_frame, text="📂 Chọn file", command=select_input_file, bg="#374151", fg=PALETTE["text"], cursor="hand2").pack(side="left")
+
+# Hàng Output File
+output_frame = tk.Frame(section1, bg=PALETTE["panel"])
+output_frame.pack(fill="x", padx=10, pady=5)
+
+ttk.Label(output_frame, text="File đầu ra:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 10))
 output_path = tk.StringVar()
+output_entry = tk.Entry(output_frame, textvariable=output_path, font=("Segoe UI", 10), bg=PALETTE["input_bg"], fg=PALETTE["text"], insertbackground=PALETTE["accent"])
+output_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+def select_output_file():
+	file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+	if file_path:
+		output_path.set(file_path)
+
+tk.Button(output_frame, text="📁 Chọn nơi lưu", command=select_output_file, bg="#374151", fg=PALETTE["text"], cursor="hand2").pack(side="left")
+
+# Section: Cài đặt mô hình
+section2 = ttk.Frame(main_frame, style="Card.TFrame")
+section2.grid(row=2, column=0, columnspan=2, sticky="ew", pady=5)
+
+ttk.Label(section2, text="🤖 Model & Tham số", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 5))
+
+settings_row1 = tk.Frame(section2, bg=PALETTE["panel"])
+settings_row1.pack(fill="x", padx=10, pady=5)
+
+# Model
+ttk.Label(settings_row1, text="Model:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 10))
 model_var = tk.StringVar(value=MODELS[0])
+model_combo = ttk.Combobox(settings_row1, textvariable=model_var, values=MODELS, state="readonly", font=("Segoe UI", 10), width=40)
+model_combo.pack(side="left", padx=(0, 20))
+
+# Threads
+ttk.Label(settings_row1, text="Threads:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 5))
 thread_var = tk.StringVar(value="3")
+thread_spin = ttk.Spinbox(settings_row1, from_=1, to=16, textvariable=thread_var, font=("Segoe UI", 10), width=5)
+thread_spin.pack(side="left")
+
+settings_row2 = tk.Frame(section2, bg=PALETTE["panel"])
+settings_row2.pack(fill="x", padx=10, pady=5)
+
+# Chunk Size
+ttk.Label(settings_row2, text="Chunk Size:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 5))
 chunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))
+chunk_size_spin = ttk.Spinbox(settings_row2, from_=500, to=50000, textvariable=chunk_size_var, font=("Segoe UI", 10), width=8)
+chunk_size_spin.pack(side="left", padx=(0, 20))
+
+# Max Output Tokens
+ttk.Label(settings_row2, text="Max Output Tokens:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 5))
 max_output_tokens_var = tk.StringVar(value=str(MAX_TOKENS))
+max_output_tokens_spin = ttk.Spinbox(settings_row2, from_=256, to=65536, textvariable=max_output_tokens_var, font=("Segoe UI", 10), width=8)
+max_output_tokens_spin.pack(side="left", padx=(0, 20))
+
+# Temperature
+ttk.Label(settings_row2, text="Temperature:", background=PALETTE["panel"], foreground=PALETTE["text"]).pack(side="left", padx=(0, 5))
 temp_var = tk.StringVar(value="0.5")
+temp_scale = ttk.Scale(settings_row2, from_=0.0, to=2.0, orient="horizontal", variable=temp_var)
+temp_scale.pack(side="left", fill="x", expand=True)
 
-entry_opts = {"bg": PALETTE["input_bg"], "fg": PALETTE["text"], "insertbackground": PALETTE["accent"], "relief": "flat", "highlightthickness": 1, "highlightbackground": PALETTE["border"]}
+# Section: Prompt
+section3 = ttk.Frame(main_frame, style="Card.TFrame")
+section3.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
 
-card_api = build_card(translate_tab, "🔐 API Key (sk-...) ", 0, 1, colspan=2)
-tk.Label(card_api, text="Nhập API key dạng sk-... Key được mã hóa và chỉ dùng trên máy này.", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=(0, 6))
+ttk.Label(section3, text="✍️ Prompt Dịch", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 5))
 
-api_key_frame = tk.Frame(card_api, bg=PALETTE["panel"])
-api_key_frame.grid(row=2, column=0, sticky="ew")
-api_key_frame.columnconfigure(0, weight=1)
+prompt_frame = tk.Frame(section3, bg=PALETTE["panel"])
+prompt_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-api_key_entry = tk.Entry(api_key_frame, show="*", width=60, **entry_opts)
-api_key_entry.grid(row=0, column=0, sticky="ew")
+prompt_text = scrolledtext.ScrolledText(prompt_frame, height=8, font=("Segoe UI", 9), bg=PALETTE["input_bg"], fg=PALETTE["text"], insertbackground=PALETTE["accent"], wrap=tk.WORD)
+prompt_text.pack(fill="both", expand=True)
 
-def toggle_api_key_visibility():
-	if api_key_entry.cget('show') == '*':
-		api_key_entry.config(show='')
-		btn_toggle_api.config(text='🙈 Ẩn')
-	else:
-		api_key_entry.config(show='*')
-		btn_toggle_api.config(text='👁️ Hiện')
+# Section: Kiểm soát
+section4 = ttk.Frame(main_frame, style="Card.TFrame")
+section4.grid(row=4, column=0, columnspan=2, sticky="ew", pady=5)
 
-btn_toggle_api = tk.Button(api_key_frame, text="👁️ Hiện", font=("Segoe UI", 9, "bold"), pady=2, command=toggle_api_key_visibility)
-btn_toggle_api.grid(row=0, column=1, padx=(6, 0))
+ttk.Label(section4, text="🎮 Kiểm soát", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 5))
 
-tk.Label(card_api, text="API endpoint: https://llm.chiasegpu.vn/v1/chat/completions", bg=PALETTE["panel"], fg=PALETTE["accent_alt"], font=("Segoe UI", 9, "bold")).grid(row=3, column=0, sticky="w", pady=(4, 0))
+ctrl_frame = tk.Frame(section4, bg=PALETTE["panel"])
+ctrl_frame.pack(fill="x", padx=10, pady=(0, 10))
 
-card_files = build_card(translate_tab, "📂 Chọn file nguồn / đích", 0, 2)
-tk.Label(card_files, text="File truyện đầu vào (.txt)", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).grid(row=1, column=0, sticky="w")
-frame_input = tk.Frame(card_files, bg=PALETTE["panel"])
-frame_input.grid(row=2, column=0, sticky="ew", pady=(2, 8))
-frame_input.columnconfigure(0, weight=1)
-tk.Entry(frame_input, textvariable=input_path, **entry_opts).grid(row=0, column=0, sticky="ew")
-tk.Button(frame_input, text="Chọn file", bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=6,
-		  command=lambda: input_path.set(filedialog.askopenfilename(filetypes=[("Text files", "*.txt")]))
-).grid(row=0, column=1, padx=(8, 0))
+btn_start = tk.Button(ctrl_frame, text="▶️ BẮT ĐẦU DỊCH", command=start_translation, bg="#10b981", fg="white", font=("Segoe UI", 11, "bold"), cursor="hand2", padx=20, pady=8)
+btn_start.pack(side="left", padx=5)
 
-tk.Label(card_files, text="Output sẽ tự động lưu cạnh file input theo mẫu: Dich_tên_file_số_ngẫu_nhiên.txt", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9)).grid(row=3, column=0, sticky="w", pady=(6, 0))
+btn_pause = tk.Button(ctrl_frame, text="⏸️ TẠM DỪNG", command=toggle_pause, state="disabled", bg="#FFC107", fg="#0b0f19", font=("Segoe UI", 11, "bold"), cursor="hand2", padx=20, pady=8)
+btn_pause.pack(side="left", padx=5)
 
-card_config = build_card(translate_tab, "⚙️ Cấu hình dịch", 1, 2)
-tk.Label(card_config, text="Model", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).grid(row=1, column=0, sticky="w")
-model_cb = ttk.Combobox(card_config, values=MODELS, textvariable=model_var, state="readonly")
-model_cb.grid(row=2, column=0, sticky="ew", pady=(2, 8))
+btn_stop = tk.Button(ctrl_frame, text="🛑 DỪNG", command=stop_translation, state="disabled", bg="#ef4444", fg="white", font=("Segoe UI", 11, "bold"), cursor="hand2", padx=20, pady=8)
+btn_stop.pack(side="left", padx=5)
 
-perf_frame = tk.Frame(card_config, bg=PALETTE["panel"])
-perf_frame.grid(row=3, column=0, sticky="ew", pady=(2, 8))
-for col in range(3):
-	perf_frame.columnconfigure(col, weight=1)
+btn_save = tk.Button(ctrl_frame, text="💾 LƯU CÀI ĐẶT", command=save_settings, bg="#6366f1", fg="white", font=("Segoe UI", 11, "bold"), cursor="hand2", padx=20, pady=8)
+btn_save.pack(side="left", padx=5)
 
-tk.Label(perf_frame, text="Số luồng", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
-thread_box = tk.Entry(perf_frame, textvariable=thread_var, width=8, **entry_opts)
-thread_box.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(2, 0))
-
-tk.Label(perf_frame, text="Chunk size", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).grid(row=0, column=1, sticky="w")
-chunk_size_box = tk.Entry(perf_frame, textvariable=chunk_size_var, width=10, **entry_opts)
-chunk_size_box.grid(row=1, column=1, sticky="ew", padx=3, pady=(2, 0))
-
-tk.Label(perf_frame, text="Max output tokens", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).grid(row=0, column=2, sticky="w")
-max_output_tokens_box = tk.Entry(perf_frame, textvariable=max_output_tokens_var, width=12, **entry_opts)
-max_output_tokens_box.grid(row=1, column=2, sticky="ew", padx=(6, 0), pady=(2, 0))
-
-tk.Label(card_config, text="Nhiệt độ (0-1)", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).grid(row=4, column=0, sticky="w")
-temp_scale = ttk.Scale(card_config, from_=0.0, to=1.0, variable=temp_var, orient="horizontal", length=200, style="Accent.Horizontal.TScale")
-temp_scale.grid(row=5, column=0, sticky="ew")
-temp_label = tk.Label(card_config, textvariable=temp_var, bg=PALETTE["panel"], fg=PALETTE["accent"], font=("Segoe UI", 10, "bold"))
-temp_label.grid(row=5, column=1, padx=(8, 0))
-
-def update_temp_label(event=None):
-	temp_var.set(f"{float(temp_var.get()):.2f}")
-
-temp_scale.bind("<Motion>", update_temp_label)
-temp_scale.bind("<ButtonRelease-1>", update_temp_label)
-
-card_prompt = build_card(translate_tab, "📝 Prompt dịch giả", 0, 3, colspan=2)
-prompt_text = tk.Text(card_prompt, height=5, bg=PALETTE["input_bg"], fg=PALETTE["text"], insertbackground=PALETTE["accent"], wrap="word", relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"])
-prompt_text.grid(row=1, column=0, sticky="nsew", pady=(4, 6))
-prompt_text.insert(tk.END, DEFAULT_PROMPT)
-card_prompt.rowconfigure(1, weight=1)
-
-card_stats = build_card(translate_tab, "📊 Thống kê", 0, 4)
-stats_time_var = tk.StringVar(value="⏱️ Đã chạy: --:--")
-stats_eta_var = tk.StringVar(value="⏳ Còn lại: --:--")
-stats_speed_var = tk.StringVar(value="🚀 Tốc độ: -- đoạn/phút")
-stats_chars_var = tk.StringVar(value="📝 Ký tự: -- → --")
-stats_input_tokens_var = tk.StringVar(value="🔢 Input Token: --")
-stats_output_tokens_var = tk.StringVar(value="🔢 Output Token: --")
-stats_input_cost_var = tk.StringVar(value="💵 Input Cost: $0.0000")
-stats_output_cost_var = tk.StringVar(value="💵 Output Cost: $0.0000")
-stats_total_cost_var = tk.StringVar(value="💰 Total Cost: $0.0000")
-
-for i, var in enumerate([
-	stats_time_var,
-	stats_eta_var,
-	stats_speed_var,
-	stats_chars_var,
-	stats_input_tokens_var,
-	stats_output_tokens_var,
-	stats_input_cost_var,
-	stats_output_cost_var,
-	stats_total_cost_var,
-]):
-	tk.Label(card_stats, textvariable=var, bg=PALETTE["panel"], fg=PALETTE["text"], font=("Consolas", 10)).grid(row=1 + i // 2, column=i % 2, sticky="w", padx=8, pady=4)
-
-card_progress = build_card(translate_tab, "🚀 Điều khiển & tiến độ", 1, 4)
-progress_bar = ttk.Progressbar(card_progress, style="Accent.Horizontal.TProgressbar", length=400, mode="determinate")
-progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 8))
+# Status
 status_var = tk.StringVar(value="Sẵn sàng")
-tk.Label(card_progress, textvariable=status_var, bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 10, "italic")).grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 8))
+status_label = ttk.Label(section4, textvariable=status_var, background=PALETTE["panel"], foreground=PALETTE["accent"], font=("Segoe UI", 10, "bold"))
+status_label.pack(anchor="w", padx=10, pady=(0, 10))
 
-btn_pause = tk.Button(card_progress, text="⏸️ TẠM DỪNG", font=("Segoe UI", 10, "bold"), bg="#fbbf24", fg="#0b0f19", bd=0, padx=10, pady=10, command=toggle_pause, state="disabled")
-btn_pause.grid(row=3, column=0, sticky="ew", padx=(0, 6))
-btn_stop = tk.Button(card_progress, text="🛑 DỪNG HẲN", font=("Segoe UI", 10, "bold"), bg=PALETTE["warn"], fg="#0b0f19", bd=0, padx=10, pady=10, command=stop_translation, state="disabled")
-btn_stop.grid(row=3, column=1, sticky="ew", padx=6)
-btn_start = tk.Button(card_progress, text="🚀 BẮT ĐẦU DỊCH", font=("Segoe UI", 11, "bold"), bg=PALETTE["accent"], fg="#0b0f19", bd=0, padx=10, pady=12, command=start_translation)
-btn_start.grid(row=3, column=2, sticky="ew", padx=(6, 0))
+# Section: Thống kê
+section5 = ttk.Frame(main_frame, style="Card.TFrame")
+section5.grid(row=5, column=0, columnspan=2, sticky="ew", pady=5)
 
-btn_save_settings = tk.Button(card_progress, text="💾 LƯU CÀI ĐẶT", font=("Segoe UI", 10, "bold"), bg=PALETTE["ok"], fg="#0b0f19", bd=0, padx=10, pady=8, command=save_settings)
-btn_save_settings.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0), padx=(0, 6))
-btn_reset_prompt = tk.Button(card_progress, text="🔄 RESET PROMPT", font=("Segoe UI", 10, "bold"), bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=8, command=lambda: (prompt_text.delete("1.0", tk.END), prompt_text.insert(tk.END, DEFAULT_PROMPT)))
-btn_reset_prompt.grid(row=4, column=2, sticky="ew", pady=(8, 0), padx=(6, 0))
+ttk.Label(section5, text="📊 Thống kê", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 5))
 
-for c in range(3):
-	card_progress.columnconfigure(c, weight=1)
+stats_frame = tk.Frame(section5, bg=PALETTE["panel"])
+stats_frame.pack(fill="x", padx=10, pady=(0, 10))
 
-card_log = build_card(translate_tab, "📋 Nhật ký hoạt động", 0, 5, colspan=2)
-log_box = scrolledtext.ScrolledText(card_log, height=8, state="disabled", bg=PALETTE["input_bg"], fg=PALETTE["text"], insertbackground=PALETTE["accent"], relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"])
-log_box.grid(row=1, column=0, sticky="nsew")
-card_log.rowconfigure(1, weight=1)
+stats_time_var = tk.StringVar(value="⏱️ Đã chạy: --:--")
+ttk.Label(stats_frame, textvariable=stats_time_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
 
-card_history = build_card(history_tab, "🗂️ Lịch sử dịch", 0, 0, colspan=1)
-history_toolbar = tk.Frame(card_history, bg=PALETTE["panel"])
-history_toolbar.grid(row=1, column=0, sticky="ew", pady=(0, 6))
-history_toolbar.columnconfigure(0, weight=1)
-history_hint_var = tk.StringVar(value="Hiển thị 20 lần dịch gần nhất.")
-history_hint_label = tk.Label(history_toolbar, textvariable=history_hint_var, bg=PALETTE["panel"], fg="#000000", font=("Segoe UI", 9))
-history_hint_label.grid(row=0, column=0, sticky="w")
-tk.Button(history_toolbar, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"), bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=5, command=refresh_history_display).grid(row=0, column=1, padx=(8, 6))
-tk.Button(history_toolbar, text="🗑️ Xóa lịch sử", font=("Segoe UI", 9, "bold"), bg=PALETTE["warn"], fg="#0b0f19", bd=0, padx=10, pady=5, command=clear_translation_history).grid(row=0, column=2)
+stats_eta_var = tk.StringVar(value="⏳ Còn lại: --:--")
+ttk.Label(stats_frame, textvariable=stats_eta_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
 
-history_table_frame = tk.Frame(card_history, bg=PALETTE["panel"])
-history_table_frame.grid(row=2, column=0, sticky="nsew")
-history_table_frame.columnconfigure(0, weight=1)
-history_table_frame.rowconfigure(0, weight=1)
+stats_speed_var = tk.StringVar(value="🚀 Tốc độ: 0 đoạn/phút")
+ttk.Label(stats_frame, textvariable=stats_speed_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
 
-history_columns = (
-	"start_at",
-	"status",
-	"model",
-	"progress",
-	"chars",
-	"tokens",
-	"cost",
-	"duration",
-	"meta",
-	"files",
-	"error",
+stats_chars_var = tk.StringVar(value="📝 Ký tự: 0 → 0")
+ttk.Label(stats_frame, textvariable=stats_chars_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
+
+stats_input_tokens_var = tk.StringVar(value="🔢 Input Token: 0")
+ttk.Label(stats_frame, textvariable=stats_input_tokens_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
+
+stats_output_tokens_var = tk.StringVar(value="🔢 Output Token: 0")
+ttk.Label(stats_frame, textvariable=stats_output_tokens_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
+
+stats_input_cost_var = tk.StringVar(value="💵 Input Cost: $0.0000")
+ttk.Label(stats_frame, textvariable=stats_input_cost_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
+
+stats_output_cost_var = tk.StringVar(value="💵 Output Cost: $0.0000")
+ttk.Label(stats_frame, textvariable=stats_output_cost_var, background=PALETTE["panel"], foreground=PALETTE["text"]).pack(anchor="w")
+
+stats_total_cost_var = tk.StringVar(value="💰 Total Cost: $0.0000")
+ttk.Label(stats_frame, textvariable=stats_total_cost_var, background=PALETTE["panel"], foreground=PALETTE["accent"], font=("Segoe UI", 10, "bold")).pack(anchor="w")
+
+# Progress Bar
+progress_bar = ttk.Progressbar(section5, style="Accent.Horizontal.TProgressbar", length=400, mode='determinate')
+progress_bar.pack(fill="x", padx=10, pady=(0, 10))
+
+# Section: Nhật ký
+section6 = ttk.Frame(main_frame, style="Card.TFrame")
+section6.grid(row=6, column=0, columnspan=2, sticky="ew", pady=5)
+
+ttk.Label(section6, text="📝 Nhật ký", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 5))
+
+log_box = scrolledtext.ScrolledText(section6, height=10, font=("Segoe UI", 9), bg=PALETTE["input_bg"], fg=PALETTE["text"], state="disabled")
+log_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+# Section: Lịch sử dịch
+section7 = ttk.Frame(main_frame, style="Card.TFrame")
+section7.grid(row=7, column=0, columnspan=2, sticky="ew", pady=5)
+
+ttk.Label(section7, text="📚 Lịch sử dịch", style="Section.TLabel").pack(anchor="w", padx=10, pady=(10, 5))
+
+history_hint_var = tk.StringVar(value="Chưa có lịch sử dịch.")
+history_hint_label = tk.Label(section7, textvariable=history_hint_var, bg=PALETTE["panel"], fg="#000000", font=("Segoe UI", 9))
+history_hint_label.pack(anchor="w", padx=10, pady=(0, 5))
+
+# Treeview cho lịch sử
+history_frame = tk.Frame(section7, bg=PALETTE["panel"])
+history_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+history_table = ttk.Treeview(
+	history_frame,
+	style="History.Treeview",
+	columns=("start_at", "status", "model", "chunks", "chars", "tokens", "cost", "time", "meta", "files", "error"),
+	height=8,
+	show="headings",
 )
 
-history_table = ttk.Treeview(history_table_frame, columns=history_columns, show="headings", style="History.Treeview")
-history_table.grid(row=0, column=0, sticky="nsew")
-
-history_scroll_y = ttk.Scrollbar(history_table_frame, orient="vertical", command=history_table.yview)
-history_scroll_y.grid(row=0, column=1, sticky="ns")
-history_scroll_x = ttk.Scrollbar(history_table_frame, orient="horizontal", command=history_table.xview)
-history_scroll_x.grid(row=1, column=0, sticky="ew")
-history_table.configure(yscrollcommand=history_scroll_y.set, xscrollcommand=history_scroll_x.set)
-
-history_table.heading("start_at", text="Bắt đầu")
+history_table.heading("start_at", text="Thời gian")
 history_table.heading("status", text="Trạng thái")
 history_table.heading("model", text="Model")
-history_table.heading("progress", text="Tiến độ")
+history_table.heading("chunks", text="Đoạn")
 history_table.heading("chars", text="Ký tự")
 history_table.heading("tokens", text="Token")
-history_table.heading("cost", text="Tổng tiền")
-history_table.heading("duration", text="Thời gian")
-history_table.heading("meta", text="Thiết lập")
+history_table.heading("cost", text="Chi phí")
+history_table.heading("time", text="Thời lượng")
+history_table.heading("meta", text="Meta")
 history_table.heading("files", text="File")
 history_table.heading("error", text="Lỗi")
 
-history_table.column("start_at", width=145, anchor="w")
-history_table.column("status", width=95, anchor="center")
-history_table.column("model", width=220, anchor="w")
-history_table.column("progress", width=90, anchor="center")
-history_table.column("chars", width=160, anchor="e")
-history_table.column("tokens", width=190, anchor="e")
-history_table.column("cost", width=100, anchor="e")
-history_table.column("duration", width=90, anchor="center")
-history_table.column("meta", width=130, anchor="center")
-history_table.column("files", width=340, anchor="w")
-history_table.column("error", width=220, anchor="w")
+history_table.column("start_at", width=140)
+history_table.column("status", width=100)
+history_table.column("model", width=120)
+history_table.column("chunks", width=100)
+history_table.column("chars", width=120)
+history_table.column("tokens", width=120)
+history_table.column("cost", width=100)
+history_table.column("time", width=100)
+history_table.column("meta", width=120)
+history_table.column("files", width=180)
+history_table.column("error", width=200)
 
-history_table.tag_configure("odd", background=PALETTE["input_bg"])
-history_table.tag_configure("even", background=PALETTE["panel"])
-history_table.tag_configure("status_completed", foreground="#000000")
-history_table.tag_configure("status_stopped", foreground="#000000")
-history_table.tag_configure("status_error", foreground="#000000")
+history_scrollbar = ttk.Scrollbar(history_frame, orient="horizontal", command=history_table.xview)
+history_table.configure(xscrollcommand=history_scrollbar.set)
+history_table.pack(fill="both", expand=True)
+history_scrollbar.pack(fill="x")
 
-card_history.rowconfigure(2, weight=1)
+# Nút xóa lịch sử
+btn_clear_history = tk.Button(section7, text="🗑️ Xóa lịch sử", command=clear_translation_history, bg="#ef4444", fg="white", font=("Segoe UI", 9, "bold"), cursor="hand2")
+btn_clear_history.pack(anchor="w", padx=10, pady=(0, 10))
 
-# ================= CHUNK PREVIEW TAB =================
-preview_tab.columnconfigure(0, weight=1)
-preview_tab.columnconfigure(1, weight=3)
-preview_tab.rowconfigure(1, weight=1)
+# ================= KHỞI TẠO =================
+settings = load_settings()
+apply_settings(settings)
+refresh_history_display()
 
-preview_toolbar = tk.Frame(preview_tab, bg=PALETTE["panel"])
-preview_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6), padx=6)
-
-preview_info_var = tk.StringVar(value="Tổng số chunk: 0")
-
-previewed_chunks = []
-
-def load_and_preview_chunks():
-	global previewed_chunks
-	try:
-		input_file = input_path.get()
-		if not input_file or not os.path.exists(input_file):
-			messagebox.showwarning("Cảnh báo", "Vui lòng chọn file đầu vào hợp lệ.")
-			return
-
-		try:
-			size_limit = int(chunk_size_var.get())
-		except ValueError:
-			messagebox.showwarning("Cảnh báo", "Chunk size không hợp lệ.")
-			return
-
-		with open(input_file, "r", encoding="utf-8") as f:
-			text = f.read()
-
-		previewed_chunks = split_text(text, size_limit)
-
-		chunk_listbox.delete(0, tk.END)
-		for i, chunk in enumerate(previewed_chunks):
-			lines = chunk.strip().split("\n")
-			first_line = lines[0][:35] + "..." if len(lines[0]) > 35 else lines[0]
-			chunk_listbox.insert(tk.END, f"Chunk {i+1} ({len(chunk)} ký tự) - {first_line}")
-
-		preview_info_var.set(f"Tổng số chunk: {len(previewed_chunks)}")
-		chunk_content_text.config(state="normal")
-		chunk_content_text.delete("1.0", tk.END)
-		chunk_content_text.config(state="disabled")
-
-	except Exception as e:
-		messagebox.showerror("Lỗi", f"Không thể chia chunk: {str(e)}")
-
-tk.Button(
-	preview_toolbar,
-	text="🔄 Tải & Chia Chunk",
-	font=("Segoe UI", 9, "bold"),
-	bg=PALETTE["accent_alt"],
-	bd=0,
-	padx=10,
-	pady=5,
-	command=load_and_preview_chunks
-).pack(side="left", padx=5, pady=5)
-
-tk.Label(
-	preview_toolbar,
-	textvariable=preview_info_var,
-	bg=PALETTE["panel"],
-	fg=PALETTE["text"],
-	font=("Segoe UI", 9, "bold")
-).pack(side="left", padx=10)
-
-chunk_list_frame = tk.Frame(preview_tab, bg=PALETTE["panel"])
-chunk_list_frame.grid(row=1, column=0, sticky="nsew", padx=(6, 3), pady=6)
-chunk_list_frame.rowconfigure(0, weight=1)
-chunk_list_frame.columnconfigure(0, weight=1)
-
-chunk_list_scroll = tk.Scrollbar(chunk_list_frame)
-chunk_listbox = tk.Listbox(
-	chunk_list_frame,
-	bg=PALETTE["input_bg"],
-	fg=PALETTE["text"],
-	selectbackground=PALETTE["accent_alt"],
-	selectforeground="#000000",
-	bd=0,
-	highlightthickness=0,
-	font=("Consolas", 10)
-)
-chunk_listbox.pack(side="left", fill="both", expand=True)
-chunk_list_scroll.pack(side="right", fill="y")
-chunk_listbox.configure(yscrollcommand=chunk_list_scroll.set)
-chunk_list_scroll.configure(command=chunk_listbox.yview)
-
-chunk_content_frame = tk.Frame(preview_tab, bg=PALETTE["panel"])
-chunk_content_frame.grid(row=1, column=1, sticky="nsew", padx=(3, 6), pady=6)
-chunk_content_frame.rowconfigure(0, weight=1)
-chunk_content_frame.columnconfigure(0, weight=1)
-
-chunk_content_text = scrolledtext.ScrolledText(
-	chunk_content_frame,
-	state="disabled",
-	bg=PALETTE["input_bg"],
-	fg=PALETTE["text"],
-	bd=0,
-	highlightthickness=0,
-	font=("Consolas", 11),
-	wrap="word"
-)
-chunk_content_text.pack(fill="both", expand=True)
-
-def on_chunk_select(event):
-	selection = chunk_listbox.curselection()
-	if selection:
-		index = selection[0]
-		chunk_content_text.config(state="normal")
-		chunk_content_text.delete("1.0", tk.END)
-		chunk_content_text.insert(tk.END, previewed_chunks[index])
-		chunk_content_text.config(state="disabled")
-
-chunk_listbox.bind('<<ListboxSelect>>', on_chunk_select)
-
-# ================= COST STATS TAB =================
-stats_tab.columnconfigure(0, weight=1)
-stats_tab.rowconfigure(1, weight=1)
-
-stats_toolbar = tk.Frame(stats_tab, bg=PALETTE["panel"])
-stats_toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-
-total_cost_label_var = tk.StringVar(value="Tổng chi phí: $0.0000 (0 đ)")
-tk.Label(
-	stats_toolbar,
-	textvariable=total_cost_label_var,
-	bg=PALETTE["panel"],
-	fg=PALETTE["text"],
-	font=("Segoe UI", 12, "bold")
-).grid(row=0, column=0, padx=10, pady=10, sticky="w")
-
-def refresh_cost_stats():
-	if "cost_tree_table" not in globals():
-		return
-	for row_id in cost_tree_table.get_children():
-		cost_tree_table.delete(row_id)
-
-	history = load_translation_history()
-	if not history:
-		return
-
-	stats_tree = {}
-	overall_cost = 0.0
-	overall_cost_vnd = 0.0
-
-	for entry in history:
-		start_at = entry.get("start_at", "")
-		if not start_at or start_at == "--":
-			continue
-
-		try:
-			dt = datetime.datetime.strptime(start_at, "%Y-%m-%d %H:%M:%S")
-		except ValueError:
-			continue
-
-		iso_year, iso_week, _ = dt.isocalendar()
-		monday = dt - datetime.timedelta(days=dt.weekday())
-		sunday = monday + datetime.timedelta(days=6)
-
-		month_key = f"🗓️ Tháng {dt.month}/{dt.year}"
-		week_key = f"   📅 Tuần {iso_week} ({monday.strftime('%d/%m')} - {sunday.strftime('%d/%m')})"
-
-		cost_usd = float(entry.get("total_cost_usd", 0.0) or 0.0)
-		cost_vnd = float(entry.get("total_cost_vnd", cost_usd * USD_TO_VND) or 0.0)
-		tokens_in = entry.get("total_input_tokens", 0)
-		tokens_out = entry.get("total_output_tokens", 0)
-		tokens = tokens_in + tokens_out
-		chars = entry.get("total_input_chars", 0)
-
-		if month_key not in stats_tree:
-			stats_tree[month_key] = {
-				"cost": 0.0, "cost_vnd": 0.0, "tokens": 0, "chars": 0, "sort_val": dt.strftime("%Y-%m"),
-				"weeks": {}
-			}
-
-		month_data = stats_tree[month_key]
-		month_data["cost"] += cost_usd
-		month_data["cost_vnd"] += cost_vnd
-		month_data["tokens"] += tokens
-		month_data["chars"] += chars
-
-		if week_key not in month_data["weeks"]:
-			month_data["weeks"][week_key] = {"cost": 0.0, "cost_vnd": 0.0, "tokens": 0, "chars": 0, "sort_val": f"{iso_year}-{iso_week:02d}"}
-
-		week_data = month_data["weeks"][week_key]
-		week_data["cost"] += cost_usd
-		week_data["cost_vnd"] += cost_vnd
-		week_data["tokens"] += tokens
-		week_data["chars"] += chars
-
-		overall_cost += cost_usd
-		overall_cost_vnd += cost_vnd
-
-	total_cost_label_var.set(f"Tổng chi phí từ trước đến nay: ${overall_cost:.4f} ({int(overall_cost_vnd):,} đ)")
-
-	for month_key in sorted(stats_tree.keys(), key=lambda k: stats_tree[k]["sort_val"], reverse=True):
-		data = stats_tree[month_key]
-		m_node = cost_tree_table.insert("", tk.END, text=month_key, values=(
-			f"${data['cost']:.4f}",
-			f"{int(data['cost_vnd']):,} đ",
-			f"{data['tokens']:,}",
-			f"{data['chars']:,}"
-		), tags=("month_row",), open=True)
-
-		weeks = data["weeks"]
-		for week_key in sorted(weeks.keys(), key=lambda k: weeks[k]["sort_val"], reverse=True):
-			w_data = weeks[week_key]
-			cost_tree_table.insert(m_node, tk.END, text=week_key, values=(
-				f"${w_data['cost']:.4f}",
-				f"{int(w_data['cost_vnd']):,} đ",
-				f"{w_data['tokens']:,}",
-				f"{w_data['chars']:,}"
-			), tags=("week_row",))
-
-tk.Button(
-	stats_toolbar,
-	text="🔄 Làm mới thống kê",
-	font=("Segoe UI", 9, "bold"),
-	bg=PALETTE["accent_alt"],
-	fg="#0b0f19",
-	bd=0,
-	padx=10,
-	pady=8,
-	command=refresh_cost_stats
-).grid(row=0, column=2, padx=10)
-
-stats_panels_frame = tk.Frame(stats_tab, bg=PALETTE["bg"])
-stats_panels_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
-stats_panels_frame.columnconfigure(0, weight=1)
-stats_panels_frame.rowconfigure(0, weight=1)
-
-card_tree = build_card(stats_panels_frame, "📊 Chi phí theo Tháng và Tuần", 0, 0)
-card_tree.rowconfigure(1, weight=1)
-
-tv_frame = tk.Frame(card_tree, bg=PALETTE["panel"])
-tv_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
-tv_frame.columnconfigure(0, weight=1)
-tv_frame.rowconfigure(0, weight=1)
-
-cost_columns = ("total_cost", "total_cost_vnd", "total_tokens", "total_chars")
-cost_tree_table = ttk.Treeview(tv_frame, columns=cost_columns, style="History.Treeview")
-cost_tree_table.grid(row=0, column=0, sticky="nsew")
-
-tv_scroll_y = ttk.Scrollbar(tv_frame, orient="vertical", command=cost_tree_table.yview)
-tv_scroll_y.grid(row=0, column=1, sticky="ns")
-cost_tree_table.configure(yscrollcommand=tv_scroll_y.set)
-
-cost_tree_table.heading("#0", text="Thời gian")
-cost_tree_table.heading("total_cost", text="Chi phí (USD)")
-cost_tree_table.heading("total_cost_vnd", text="Chi phí (VNĐ)")
-cost_tree_table.heading("total_tokens", text="Số Token")
-cost_tree_table.heading("total_chars", text="Số Ký tự")
-
-cost_tree_table.column("#0", width=300, anchor="w")
-cost_tree_table.column("total_cost", width=120, anchor="e")
-cost_tree_table.column("total_cost_vnd", width=150, anchor="e")
-cost_tree_table.column("total_tokens", width=120, anchor="e")
-cost_tree_table.column("total_chars", width=120, anchor="e")
-
-cost_tree_table.tag_configure("month_row", background=PALETTE["panel"], foreground=PALETTE["accent"], font=("Segoe UI", 10, "bold"))
-cost_tree_table.tag_configure("week_row", background=PALETTE["input_bg"], foreground=PALETTE["text"])
-
-
-# Cho phép các row mở rộng
-for i in range(6):
-	translate_tab.rowconfigure(i, weight=1 if i in [3, 5] else 0)
-
-# Tải cài đặt đã lưu
-saved_settings = load_settings()
-apply_settings(saved_settings)
-
-# Áp dụng theme đã lưu
-if saved_settings.get("theme"):
-	current_theme = saved_settings["theme"]
-	PALETTE = THEMES[current_theme]
-	theme_icon = "🌙" if current_theme == "dark" else "☀️"
-	btn_theme.config(text=f"{theme_icon} {'Tối' if current_theme == 'dark' else 'Sáng'}")
-	apply_theme()
-
-# Đăng ký sự kiện đóng cửa sổ
+# Xử lý đóng cửa sổ
 root.protocol("WM_DELETE_WINDOW", on_closing)
 
-add_log("📂 Đã tải cài đặt từ lần sử dụng trước.")
-add_log("🔐 API Key được mã hóa khi lưu, chỉ hoạt động trên máy này.")
-refresh_history_display()
-try:
-	refresh_cost_stats()
-except NameError:
-	pass
-
+# Chạy ứng dụng
 root.mainloop()
