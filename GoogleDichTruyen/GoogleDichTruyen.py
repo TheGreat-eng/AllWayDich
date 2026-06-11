@@ -46,8 +46,8 @@ MODELS = [
 	"gemma-4-31b-it"
 ]
 
-CHUNK_SIZE = 3000
-MAX_OUTPUT_TOKENS = 8192
+CHUNK_SIZE = 70000
+MAX_OUTPUT_TOKENS = 70000
 DEFAULT_SCAN_CHAR_LIMIT = 10000
 
 DEFAULT_PROMPT = (
@@ -1646,18 +1646,18 @@ def validate_inputs():
 
 	try:
 		chunk_size = int(chunk_size_var.get())
-		if chunk_size < 500 or chunk_size > 50000:
+		if chunk_size < 500 or chunk_size > 70000:
 			raise ValueError
 	except Exception:
-		messagebox.showerror("Lỗi", "Chunk size phải là số nguyên từ 500 đến 50000.")
+		messagebox.showerror("Lỗi", "Chunk size phải là số nguyên từ 500 đến 70000.")
 		return False
 
 	try:
 		max_output_tokens = int(max_output_tokens_var.get())
-		if max_output_tokens < 256 or max_output_tokens > 65536:
+		if max_output_tokens < 256 or max_output_tokens > 70000:
 			raise ValueError
 	except Exception:
-		messagebox.showerror("Lỗi", "Max output tokens phải là số nguyên từ 256 đến 65536.")
+		messagebox.showerror("Lỗi", "Max output tokens phải là số nguyên từ 256 đến 70000.")
 		return False
 
 	try:
