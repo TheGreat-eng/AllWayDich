@@ -2031,8 +2031,9 @@ def process_translation_logic():
 			except Exception as e:
 				add_log(f"⚠️ Upload Google Drive thất bại: {e}")
 
-		if os.path.exists(cp_file):
-			os.remove(cp_file)
+		# Bỏ xóa file checkpoint để hỗ trợ dịch lại cục bộ (Partial Regenerate)
+		# if os.path.exists(cp_file):
+		# 	os.remove(cp_file)
 
 		total_time = time.time() - stats["start_time"]
 		add_log(f"🎊 HOÀN TẤT! Tổng thời gian: {format_time(total_time)}")
@@ -2682,10 +2683,12 @@ preview_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6), pa
 preview_info_var = tk.StringVar(value="Tổng số chunk: 0")
 
 previewed_chunks = []
+translated_preview_chunks = {}
 
 def load_and_preview_chunks():
-	global previewed_chunks
+	global previewed_chunks, translated_preview_chunks
 	
+	translated_preview_chunks = {}
 	try:
 		input_file = input_path.get()
 	except NameError:
@@ -2712,10 +2715,24 @@ def load_and_preview_chunks():
 			first_line = lines[0][:35] + "..." if len(lines[0]) > 35 else lines[0]
 			chunk_listbox.insert(tk.END, f"Chunk {i+1} ({len(chunk)} ký tự) - {first_line}")
 		
+		# Load translated chunks if exist
+		cp_file = get_checkpoint_path(input_file)
+		if os.path.exists(cp_file):
+			try:
+				with open(cp_file, "r", encoding="utf-8") as f:
+					saved_data = json.load(f)
+					for k, v in saved_data.items():
+						translated_preview_chunks[int(k)] = v
+			except Exception as e:
+				pass
+
 		preview_info_var.set(f"Tổng số chunk: {len(previewed_chunks)}")
 		chunk_content_text.config(state="normal")
 		chunk_content_text.delete("1.0", tk.END)
 		chunk_content_text.config(state="disabled")
+		chunk_translated_text.config(state="normal")
+		chunk_translated_text.delete("1.0", tk.END)
+		chunk_translated_text.config(state="disabled")
 	except Exception as e:
 		messagebox.showerror("Lỗi", f"Không thể chia chunk: {str(e)}")
 
@@ -2730,6 +2747,20 @@ tk.Button(
 	pady=5,
 	command=load_and_preview_chunks
 ).pack(side="left", padx=5, pady=5)
+
+regenerate_chunk_btn = tk.Button(
+	preview_toolbar,
+	text="✨ Dịch lại đoạn này",
+	font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["warn"],
+	fg="#0b0f19",
+	bd=0,
+	padx=10,
+	pady=5,
+	command=lambda: open_regenerate_dialog(),
+	state="disabled"
+)
+regenerate_chunk_btn.pack(side="left", padx=5, pady=5)
 
 tk.Label(
 	preview_toolbar, 
@@ -2762,8 +2793,11 @@ chunk_listbox.configure(yscrollcommand=chunk_list_scroll.set)
 chunk_content_frame = tk.Frame(preview_tab, bg=PALETTE["panel"])
 chunk_content_frame.grid(row=1, column=1, sticky="nsew", padx=(3, 6), pady=6)
 
+chunk_content_paned = tk.PanedWindow(chunk_content_frame, orient=tk.VERTICAL, bg=PALETTE["panel"], bd=0, sashwidth=4)
+chunk_content_paned.pack(fill="both", expand=True, padx=5, pady=5)
+
 chunk_content_text = scrolledtext.ScrolledText(
-	chunk_content_frame, 
+	chunk_content_paned, 
 	bg=PALETTE["input_bg"], 
 	fg=PALETTE["text"], 
 	wrap="word",
@@ -2772,8 +2806,21 @@ chunk_content_text = scrolledtext.ScrolledText(
 	highlightthickness=1,
 	highlightbackground=PALETTE["border"]
 )
-chunk_content_text.pack(fill="both", expand=True, padx=5, pady=5)
 chunk_content_text.config(state="disabled")
+chunk_content_paned.add(chunk_content_text, minsize=100)
+
+chunk_translated_text = scrolledtext.ScrolledText(
+	chunk_content_paned, 
+	bg=PALETTE["input_bg"], 
+	fg=PALETTE.get("text_accent", PALETTE["text"]), 
+	wrap="word",
+	font=("Consolas", 10),
+	relief="flat",
+	highlightthickness=1,
+	highlightbackground=PALETTE["border"]
+)
+chunk_translated_text.config(state="disabled")
+chunk_content_paned.add(chunk_translated_text, minsize=100)
 
 def on_chunk_select(event):
 	selection = chunk_listbox.curselection()
@@ -2781,10 +2828,119 @@ def on_chunk_select(event):
 		index = selection[0]
 		chunk_content_text.config(state="normal")
 		chunk_content_text.delete("1.0", tk.END)
-		chunk_content_text.insert(tk.END, previewed_chunks[index])
+		chunk_content_text.insert(tk.END, "--- BẢN GỐC ---\n" + previewed_chunks[index])
 		chunk_content_text.config(state="disabled")
 		
+		chunk_translated_text.config(state="normal")
+		chunk_translated_text.delete("1.0", tk.END)
+		if index in translated_preview_chunks:
+			chunk_translated_text.insert(tk.END, "--- BẢN DỊCH ---\n" + translated_preview_chunks[index])
+		else:
+			chunk_translated_text.insert(tk.END, "--- CHƯA DỊCH ---")
+		chunk_translated_text.config(state="disabled")
+		
+		regenerate_chunk_btn.config(state="normal")
+		
 chunk_listbox.bind('<<ListboxSelect>>', on_chunk_select)
+
+def open_regenerate_dialog():
+	selection = chunk_listbox.curselection()
+	if not selection:
+		return
+	index = selection[0]
+	chunk_text = previewed_chunks[index]
+	
+	dialog = tk.Toplevel(root)
+	dialog.title(f"Dịch lại cục bộ - Chunk {index+1}")
+	dialog.geometry("800x650")
+	dialog.configure(bg=PALETTE["bg"])
+	dialog.transient(root)
+	dialog.grab_set()
+	
+	tk.Label(dialog, text="Bản gốc:", bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", padx=10, pady=(10, 0))
+	orig_text = scrolledtext.ScrolledText(dialog, height=8, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word")
+	orig_text.pack(fill="x", padx=10, pady=5)
+	orig_text.insert(tk.END, chunk_text)
+	orig_text.config(state="disabled")
+	
+	tk.Label(dialog, text="Tùy chỉnh Prompt (Ví dụ: Đổi xưng hô thành huynh-đệ):", bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", padx=10, pady=(10, 0))
+	prompt_entry = tk.Entry(dialog, bg=PALETTE["input_bg"], fg=PALETTE["text"], font=("Segoe UI", 10))
+	prompt_entry.pack(fill="x", padx=10, pady=5)
+	
+	tk.Label(dialog, text="Bản dịch hiện tại (Có thể sửa tay rồi lưu luôn):", bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", padx=10, pady=(10, 0))
+	trans_text = scrolledtext.ScrolledText(dialog, height=10, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word")
+	trans_text.pack(fill="both", expand=True, padx=10, pady=5)
+	if index in translated_preview_chunks:
+		trans_text.insert(tk.END, translated_preview_chunks[index])
+		
+	def do_regenerate():
+		custom_prompt = prompt_entry.get().strip()
+		base_prompt = prompt_text.get("1.0", tk.END).strip()
+		glossary_raw = glossary_text.get("1.0", tk.END).strip()
+		glossary_entries = parse_glossary(glossary_raw)
+		full_prompt = build_prompt_with_glossary(base_prompt, glossary_entries)
+		
+		if custom_prompt:
+			full_prompt = f"Yêu cầu đặc biệt cho đoạn này: {custom_prompt}\n\n{full_prompt}"
+			
+		model = model_var.get()
+		temperature = float(temp_var.get())
+		max_tokens = int(max_output_tokens_var.get())
+		api_key = api_key_entry.get().strip()
+		
+		trans_text.config(state="disabled")
+		trans_text.delete("1.0", tk.END)
+		trans_text.insert(tk.END, "Đang dịch lại bằng AI...")
+		
+		def run():
+			try:
+				genai.configure(api_key=api_key)
+				_, result = translate_chunk(model, full_prompt, chunk_text, index, get_checkpoint_path(input_path.get()), temperature, max_tokens)
+				
+				dialog.after(0, lambda: [
+					trans_text.config(state="normal"),
+					trans_text.delete("1.0", tk.END),
+					trans_text.insert(tk.END, result if result else "LỖI DỊCH THUẬT (Kết quả rỗng)"),
+				])
+			except Exception as e:
+				dialog.after(0, lambda: [
+					trans_text.config(state="normal"),
+					trans_text.delete("1.0", tk.END),
+					trans_text.insert(tk.END, f"LỖI: {e}"),
+				])
+				
+		threading.Thread(target=run, daemon=True).start()
+		
+	def save_and_close():
+		new_trans = trans_text.get("1.0", tk.END).strip()
+		if not new_trans:
+			messagebox.showwarning("Cảnh báo", "Bản dịch đang trống!")
+			return
+			
+		translated_preview_chunks[index] = new_trans
+		
+		cp_file = get_checkpoint_path(input_path.get())
+		saved_data = {}
+		if os.path.exists(cp_file):
+			try:
+				with open(cp_file, "r", encoding="utf-8") as f:
+					saved_data = json.load(f)
+			except:
+				pass
+			
+		saved_data[str(index)] = new_trans
+		with open(cp_file, "w", encoding="utf-8") as f:
+			json.dump(saved_data, f, ensure_ascii=False, indent=2)
+			
+		on_chunk_select(None)
+		dialog.destroy()
+		messagebox.showinfo("Thành công", f"Đã cập nhật bản dịch mới cho Chunk {index+1} vào checkpoint.")
+		
+	btn_frame = tk.Frame(dialog, bg=PALETTE["bg"])
+	btn_frame.pack(fill="x", padx=10, pady=10)
+	
+	tk.Button(btn_frame, text="✨ Dịch lại bằng AI", bg=PALETTE["accent"], fg="#0b0f19", font=("Segoe UI", 10, "bold"), command=do_regenerate).pack(side="left", padx=5)
+	tk.Button(btn_frame, text="💾 Lưu và Đóng", bg=PALETTE["ok"], fg="#0b0f19", font=("Segoe UI", 10, "bold"), command=save_and_close).pack(side="right", padx=5)
 
 
 # ================= QUICK TRANSLATE TAB (CLIPBOARD) =================
