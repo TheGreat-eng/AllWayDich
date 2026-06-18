@@ -1007,11 +1007,11 @@ def apply_theme():
 	root.configure(bg=PALETTE["bg"])
 	canvas_bg.configure(bg=PALETTE["bg"])
 
-	scrollbar.configure(
-		bg=PALETTE["border"],
-		troughcolor=PALETTE["bg"],
-		activebackground=PALETTE["accent"],
-	)
+	# Note: ttk.Scrollbar doesn't support custom bg/troughcolor (use Style instead if needed)
+	# scrollbar.configure(
+	# 	troughcolor=PALETTE["bg"],
+	# 	activebackground=PALETTE["accent"],
+	# )
 
 	style.configure("Card.TFrame", background=PALETTE["panel"])
 	style.configure("TLabel", background=PALETTE["panel"], foreground=PALETTE["text"])
@@ -1566,20 +1566,24 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			stats["total_output_cost_usd"] += output_cost
 			stats["total_cost_usd"] = stats["total_input_cost_usd"] + stats["total_output_cost_usd"]
 
+			# Quality Check
+			quality_result = check_output_quality(chunk, translated_text, index)
+			quality_result["output"] = translated_text
+			quality_check_results.append(quality_result)
+			quality_msg = log_quality_check(quality_result)
+			add_log(quality_msg)
+
 			add_log(f"✅ Hoàn thành đoạn {index + 1}")
 			return index, translated_text
 
 		except Exception as e:
-			last_error = e
-			add_log(f"⚠️ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {str(e)[:120]}")
+			last_error = str(e)
+			add_log(f"❌ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
 			time.sleep(2 + attempt * 2)
 
-	add_log(f"❌ Đoạn {index + 1} thất bại hoàn toàn sau {retries} lần thử")
-	stats["chunks_done"] += 1
-	return index, f"[ĐOẠN {index + 1} BỊ LỖI SAU {retries} LẦN THỬ: {last_error}]"
+	add_log(f"🔴 Đoạn {index + 1} thất bại sau {retries} lần thử: {last_error}")
+	return index, None
 
-
-# ================= ĐIỀU KHIỂN TẠM DỪNG =================
 def toggle_pause():
 	global is_paused
 
@@ -2106,6 +2110,191 @@ def process_translation_logic():
 		is_stopped = True
 
 
+# ================= 1. QUALITY CHECKS - KIỂM TRA CHẤT LƯỢNG =================
+quality_check_results = []
+
+def check_output_quality(chunk_input: str, chunk_output: str, index: int) -> dict:
+	"""Kiểm tra chất lượng output dịch. Trả về dict với các kiểm tra."""
+	checks = {
+		"index": index,
+		"is_empty": len(chunk_output.strip()) == 0,
+		"length_ratio": len(chunk_output) / max(len(chunk_input), 1),
+		"is_too_short": len(chunk_output.split()) < 10,
+		"has_duplicates": len(set(chunk_output.split())) < len(chunk_output.split()) * 0.5,
+	}
+	
+	# Kiểm tra xem output có lặp lại câu không
+	sentences = [s.strip() for s in chunk_output.split('.') if s.strip()]
+	if len(sentences) > 1:
+		checks["duplicate_sentences"] = len(sentences) != len(set(sentences))
+	else:
+		checks["duplicate_sentences"] = False
+	
+	return checks
+
+def log_quality_check(checks: dict) -> str:
+	"""Format kết quả kiểm tra chất lượng thành chuỗi log."""
+	index = checks["index"]
+	
+	if checks["is_empty"]:
+		return f"🔴 Chunk {index + 1}: Output trống!"
+	
+	ratio = checks["length_ratio"]
+	if ratio < 0.6:
+		return f"⚠️  Chunk {index + 1}: Output quá ngắn ({ratio:.1%} so với input)"
+	
+	if checks["is_too_short"]:
+		return f"⚠️  Chunk {index + 1}: Output chỉ có {len(checks.get('output', '').split())} từ"
+	
+	if checks["duplicate_sentences"]:
+		return f"⚠️  Chunk {index + 1}: Có câu lặp lại"
+	
+	if checks["has_duplicates"]:
+		return f"⚠️  Chunk {index + 1}: Từ lặp quá nhiều"
+	
+	return f"✅ Chunk {index + 1}: OK"
+
+
+# ================= 2. DIFF VIEWER - SO SÁNH FILE =================
+def show_diff_window(original_text: str, translated_text: str, input_file: str, output_file: str):
+	"""Mở cửa sổ so sánh gốc và dịch side-by-side."""
+	diff_win = tk.Toplevel(root)
+	diff_win.title("🔄 Diff Viewer - So sánh gốc vs dịch")
+	diff_win.geometry("1200x700")
+	diff_win.configure(bg=PALETTE["bg"])
+	
+	toolbar = tk.Frame(diff_win, bg=PALETTE["panel"])
+	toolbar.pack(fill="x", padx=10, pady=10)
+	
+	file_info = f"Gốc: {os.path.basename(input_file)} | Dịch: {os.path.basename(output_file)}"
+	tk.Label(toolbar, text=file_info, bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 9)).pack(anchor="w")
+	
+	main_frame = tk.Frame(diff_win, bg=PALETTE["bg"])
+	main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+	main_frame.columnconfigure(0, weight=1)
+	main_frame.columnconfigure(1, weight=1)
+	
+	# Cột trái: Gốc
+	left_label = tk.Label(main_frame, text="📄 Bản gốc (Trung)", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold"))
+	left_label.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+	
+	left_text = scrolledtext.ScrolledText(main_frame, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word", height=25)
+	left_text.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
+	left_text.insert(tk.END, original_text)
+	left_text.config(state="disabled")
+	
+	# Cột phải: Dịch
+	right_label = tk.Label(main_frame, text="📝 Bản dịch (Việt)", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold"))
+	right_label.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+	
+	right_text = scrolledtext.ScrolledText(main_frame, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word", height=25)
+	right_text.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
+	right_text.insert(tk.END, translated_text)
+	right_text.config(state="disabled")
+	
+	# Đồng bộ scroll
+	def sync_scroll_y(event=None):
+		left_text.yview_moveto(right_text.yview()[0])
+	
+	def sync_scroll_x(event=None):
+		left_text.xview_moveto(right_text.xview()[0])
+	
+	right_text.bind("<MouseWheel>", sync_scroll_y)
+	right_text.bind("<Button-4>", sync_scroll_y)
+	right_text.bind("<Button-5>", sync_scroll_y)
+	
+	main_frame.rowconfigure(1, weight=1)
+	
+	# Nút đóng
+	close_btn = tk.Button(diff_win, text="Đóng", bg=PALETTE["accent"], fg="#0b0f19", bd=0, padx=15, pady=8, command=diff_win.destroy)
+	close_btn.pack(pady=10)
+	
+	diff_win.transient(root)
+	diff_win.grab_set()
+
+
+# ================= 3. CLIPBOARD - PASTE FROM CLIPBOARD =================
+def paste_from_clipboard():
+	"""Lấy text từ clipboard và hiển thị."""
+	try:
+		clipboard_text = root.clipboard_get()
+		quick_input_text.config(state="normal")
+		quick_input_text.delete("1.0", tk.END)
+		quick_input_text.insert(tk.END, clipboard_text)
+		quick_input_text.config(state="normal")
+		quick_status_var.set(f"✅ Đã paste: {len(clipboard_text)} ký tự")
+	except Exception as e:
+		messagebox.showerror("Lỗi", f"Không thể lấy từ clipboard: {e}")
+
+def copy_to_clipboard():
+	"""Copy kết quả dịch vào clipboard."""
+	output_text = quick_output_text.get("1.0", tk.END).strip()
+	if not output_text:
+		messagebox.showwarning("Cảnh báo", "Chưa có kết quả dịch để copy!")
+		return
+	
+	try:
+		root.clipboard_clear()
+		root.clipboard_append(output_text)
+		quick_status_var.set("✅ Đã copy kết quả vào clipboard!")
+	except Exception as e:
+		messagebox.showerror("Lỗi", f"Không thể copy: {e}")
+
+def translate_clipboard_text():
+	"""Dịch text từ clipboard (1 chunk đơn lẻ, không queue)."""
+	if genai is None:
+		messagebox.showerror("Lỗi", "Chưa cài google-generativeai")
+		return
+	
+	api_key = api_key_entry.get().strip()
+	if not api_key:
+		messagebox.showerror("Lỗi", "Vui lòng nhập API Key")
+		return
+	
+	input_text = quick_input_text.get("1.0", tk.END).strip()
+	if not input_text:
+		messagebox.showwarning("Cảnh báo", "Vui lòng paste text vào trước!")
+		return
+	
+	genai.configure(api_key=api_key)
+	quick_status_var.set("⏳ Đang dịch...")
+	
+	def _worker():
+		try:
+			model_id = model_var.get()
+			temperature = float(temp_var.get())
+			max_tokens = int(max_output_tokens_var.get())
+			prompt = prompt_text.get("1.0", tk.END).strip()
+			glossary_raw = glossary_text.get("1.0", tk.END).strip()
+			glossary_entries = parse_glossary(glossary_raw)
+			final_prompt = build_prompt_with_glossary(prompt, glossary_entries)
+			
+			result, input_tokens, output_tokens, error_code = translate_with_gemini(
+				model_id, final_prompt, input_text, temperature, max_tokens
+			)
+			
+			if error_code:
+				result = f"[LỖI: {error_code}]"
+			
+			def _update_ui():
+				quick_output_text.config(state="normal")
+				quick_output_text.delete("1.0", tk.END)
+				quick_output_text.insert(tk.END, result or "")
+				quick_output_text.config(state="normal")
+				
+				quick_status_var.set(
+					f"✅ Dịch xong! Input: {input_tokens:,} | Output: {output_tokens:,}"
+				)
+			
+			root.after(0, _update_ui)
+		except Exception as e:
+			def _show_error():
+				quick_status_var.set(f"❌ Lỗi: {str(e)[:80]}")
+			root.after(0, _show_error)
+	
+	threading.Thread(target=_worker, daemon=True).start()
+
+
 # ================= GUI (Giao diện) =================
 root = tk.Tk()
 root.title("📖 App Dịch Truyện – Powered by Google Gemini")
@@ -2295,12 +2484,19 @@ main_frame.rowconfigure(1, weight=1)
 
 translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 preview_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+quick_translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+diff_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+quality_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+consistency_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 history_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 requests_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 stats_tab = tk.Frame(tabs, bg=PALETTE["bg"])
-consistency_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+
 tabs.add(translate_tab, text="🚀 Dịch truyện")
 tabs.add(preview_tab, text="🔍 Xem Chunk")
+tabs.add(quick_translate_tab, text="📋 Dịch nhanh")
+tabs.add(diff_tab, text="🔄 Diff Viewer")
+tabs.add(quality_tab, text="✅ Kiểm tra chất lượng")
 tabs.add(consistency_tab, text="🧭 Kiểm tra xưng hô")
 tabs.add(history_tab, text="🗂️ Lịch sử dịch")
 tabs.add(requests_tab, text="📈 Request/phút")
@@ -2308,6 +2504,16 @@ tabs.add(stats_tab, text="💰 Thống kê chi phí")
 
 for col in range(2):
 	translate_tab.columnconfigure(col, weight=1)
+
+quick_translate_tab.columnconfigure(0, weight=1)
+quick_translate_tab.rowconfigure(1, weight=1)
+quick_translate_tab.rowconfigure(2, weight=1)
+
+diff_tab.columnconfigure(0, weight=1)
+diff_tab.rowconfigure(1, weight=1)
+
+quality_tab.columnconfigure(0, weight=1)
+quality_tab.rowconfigure(1, weight=1)
 
 history_tab.columnconfigure(0, weight=1)
 history_tab.rowconfigure(1, weight=1)
@@ -2579,6 +2785,221 @@ def on_chunk_select(event):
 		chunk_content_text.config(state="disabled")
 		
 chunk_listbox.bind('<<ListboxSelect>>', on_chunk_select)
+
+
+# ================= QUICK TRANSLATE TAB (CLIPBOARD) =================
+quick_status_var = tk.StringVar(value="Sẵn sàng paste text từ clipboard")
+
+quick_input_toolbar = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_input_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
+quick_input_toolbar.columnconfigure(1, weight=1)
+
+tk.Label(quick_input_toolbar, text="📋 Paste từ Clipboard:", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+tk.Button(
+	quick_input_toolbar, text="📥 Paste from Clipboard", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=paste_from_clipboard
+).grid(row=0, column=2, padx=(8, 4), pady=8)
+
+tk.Button(
+	quick_input_toolbar, text="🗑️ Clear", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["warn"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=lambda: (quick_input_text.config(state="normal"), quick_input_text.delete("1.0", tk.END), quick_input_text.config(state="normal"))
+).grid(row=0, column=3, padx=4, pady=8)
+
+quick_input_frame = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_input_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+
+tk.Label(quick_input_frame, text="📝 Nội dung gốc (Trung):", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+
+quick_input_text = scrolledtext.ScrolledText(
+	quick_input_frame, height=10, bg=PALETTE["input_bg"], fg=PALETTE["text"],
+	wrap="word", relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"]
+)
+quick_input_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+# Output area
+quick_output_toolbar = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_output_toolbar.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 6))
+quick_output_toolbar.columnconfigure(0, weight=1)
+
+tk.Label(quick_output_toolbar, textvariable=quick_status_var, bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 9, "italic")).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+translate_quick_btn = tk.Button(
+	quick_output_toolbar, text="🚀 DỊCH NGAY", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=translate_clipboard_text
+)
+translate_quick_btn.grid(row=0, column=1, padx=(8, 4), pady=8)
+
+tk.Button(
+	quick_output_toolbar, text="📋 Copy to Clipboard", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["ok"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=copy_to_clipboard
+).grid(row=0, column=2, padx=4, pady=8)
+
+quick_output_frame = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_output_frame.grid(row=3, column=0, sticky="nsew", padx=6, pady=(0, 6))
+quick_translate_tab.rowconfigure(3, weight=1)
+
+tk.Label(quick_output_frame, text="✨ Kết quả dịch (Việt):", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+
+quick_output_text = scrolledtext.ScrolledText(
+	quick_output_frame, height=10, bg=PALETTE["input_bg"], fg=PALETTE["text"],
+	wrap="word", relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"]
+)
+quick_output_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+quick_output_text.config(state="disabled")
+
+
+# ================= DIFF VIEWER TAB =================
+diff_toolbar = tk.Frame(diff_tab, bg=PALETTE["panel"])
+diff_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
+diff_toolbar.columnconfigure(1, weight=1)
+
+tk.Label(
+	diff_toolbar, text="So sánh file gốc vs dịch side-by-side:",
+	bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")
+).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+diff_file_var = tk.StringVar()
+
+def open_diff_viewer():
+	input_file = input_path.get()
+	output_file = output_path.get()
+	
+	if not input_file or not os.path.exists(input_file):
+		messagebox.showerror("Lỗi", "Chọn file input hợp lệ trước")
+		return
+	
+	if not output_file or not os.path.exists(output_file):
+		messagebox.showerror("Lỗi", "Chọn file output hợp lệ trước")
+		return
+	
+	try:
+		with open(input_file, "r", encoding="utf-8") as f:
+			original = f.read()
+		with open(output_file, "r", encoding="utf-8") as f:
+			translated = f.read()
+		
+		show_diff_window(original, translated, input_file, output_file)
+	except Exception as e:
+		messagebox.showerror("Lỗi", f"Không thể mở file: {e}")
+
+tk.Button(
+	diff_toolbar, text="📂 Chọn file gốc", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=lambda: input_path.set(filedialog.askopenfilename(filetypes=[("Text files", "*.txt")]))
+).grid(row=0, column=2, padx=(8, 4), pady=8)
+
+tk.Button(
+	diff_toolbar, text="📂 Chọn file dịch", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=lambda: output_path.set(filedialog.askopenfilename(filetypes=[("Text files", "*.txt")]))
+).grid(row=0, column=3, padx=(0, 4), pady=8)
+
+tk.Button(
+	diff_toolbar, text="🔄 Mở Diff Viewer", font=("Segoe UI", 10, "bold"),
+	bg=PALETTE["accent"], fg="#0b0f19", bd=0, padx=15, pady=8,
+	command=open_diff_viewer
+).grid(row=0, column=4, padx=(0, 8), pady=8)
+
+diff_info_frame = tk.Frame(diff_tab, bg=PALETTE["panel"])
+diff_info_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
+diff_info_frame.columnconfigure(0, weight=1)
+diff_info_frame.rowconfigure(0, weight=1)
+
+diff_info_text = scrolledtext.ScrolledText(
+	diff_info_frame, height=30, bg=PALETTE["input_bg"], fg=PALETTE["text"],
+	wrap="word", relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"]
+)
+diff_info_text.pack(fill="both", expand=True, padx=8, pady=8)
+diff_info_text.insert(tk.END, 
+	"🔄 DIFF VIEWER - SO SÁNH GỐC VỨ DỊCH\n\n"
+	"Tính năng này cho phép bạn xem side-by-side (cạnh nhau) bản gốc và bản dịch.\n\n"
+	"Cách dùng:\n"
+	"1. Chọn file gốc (input) bên trên\n"
+	"2. Chọn file dịch (output) bên trên\n"
+	"3. Nhấn 'Mở Diff Viewer'\n"
+	"4. Một cửa sổ mới sẽ hiện ra với 2 cột:\n"
+	"   - Trái: Bản gốc (tiếng Trung)\n"
+	"   - Phải: Bản dịch (tiếng Việt)\n\n"
+	"Lợi ích:\n"
+	"✅ Review nhanh chóng\n"
+	"✅ So sánh độ dài output\n"
+	"✅ Kiểm tra tính tự nhiên của dịch\n"
+	"✅ Phát hiện lỗi dịch dễ dàng\n\n"
+	"💡 Tips: Scroll cả 2 cột sẽ đồng bộ với nhau!"
+)
+diff_info_text.config(state="disabled")
+
+
+# ================= QUALITY CHECK TAB =================
+quality_toolbar = tk.Frame(quality_tab, bg=PALETTE["panel"])
+quality_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
+quality_toolbar.columnconfigure(1, weight=1)
+
+tk.Label(
+	quality_toolbar, text="✅ Kiểm tra chất lượng dịch tự động:",
+	bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")
+).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+def refresh_quality_check():
+	quality_tree.delete(*quality_tree.get_children())
+	for result in quality_check_results:
+		status = "✅ OK"
+		if result["is_empty"]:
+			status = "🔴 Empty"
+		elif result["duplicate_sentences"]:
+			status = "⚠️ Duplicates"
+		elif result["is_too_short"]:
+			status = "⚠️ Too short"
+		elif result["length_ratio"] < 0.6:
+			status = "⚠️ Ratio"
+		
+		quality_tree.insert("", "end", values=(
+			result["index"] + 1,
+			status,
+			f"{result['length_ratio']:.1%}",
+			"✓" if not result["has_duplicates"] else "✗"
+		))
+
+tk.Button(
+	quality_toolbar, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=refresh_quality_check
+).grid(row=0, column=2, padx=8, pady=8)
+
+quality_tree_frame = tk.Frame(quality_tab, bg=PALETTE["panel"])
+quality_tree_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+
+quality_columns = ("Chunk", "Status", "Length Ratio", "No Dup")
+quality_tree = ttk.Treeview(
+	quality_tree_frame, columns=quality_columns, height=25,
+	style="Treeview"
+)
+quality_tree.heading("#0", text="ID")
+quality_tree.column("#0", width=50)
+
+for col in quality_columns:
+	quality_tree.heading(col, text=col)
+	quality_tree.column(col, width=120)
+
+scrollbar = ttk.Scrollbar(quality_tree_frame, orient="vertical", command=quality_tree.yview)
+quality_tree.configure(yscroll=scrollbar.set)
+quality_tree.pack(side="left", fill="both", expand=True)
+scrollbar.pack(side="right", fill="y")
+
+quality_info_frame = tk.Frame(quality_tab, bg=PALETTE["panel"])
+quality_info_frame.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 6))
+
+quality_info_text = tk.Label(
+	quality_info_frame, text="",
+	bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "italic"),
+	wraplength=600, justify="left"
+)
+quality_info_text.pack(anchor="w", padx=8, pady=8)
 
 
 input_path = tk.StringVar()
