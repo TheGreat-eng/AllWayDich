@@ -19,6 +19,13 @@ except ImportError:
 	genai = None
 
 try:
+	from google import genai as google_genai
+	from google.genai import types as genai_types
+except ImportError:
+	google_genai = None
+	genai_types = None
+
+try:
 	from google.oauth2.credentials import Credentials
 	from googleapiclient.discovery import build
 	from googleapiclient.errors import HttpError
@@ -210,6 +217,7 @@ def load_settings():
 		"input_file": "",
 		"output_file": "",
 		"model": MODELS[0],
+		"thinking_level": "medium",
 		"model_fallback_order": "|".join(MODELS),
 		"threads": "3",
 		"chunk_size": str(CHUNK_SIZE),
@@ -249,6 +257,7 @@ def save_settings():
 		"input_file": input_path.get(),
 		"output_file": output_path.get(),
 		"model": model_var.get(),
+		"thinking_level": thinking_level_var.get(),
 		"model_fallback_order": model_fallback_order_var.get(),
 		"threads": thread_var.get(),
 		"chunk_size": chunk_size_var.get(),
@@ -279,6 +288,7 @@ def apply_settings(settings):
 	input_path.set(settings.get("input_file", ""))
 	output_path.set(settings.get("output_file", ""))
 	model_var.set(settings.get("model", MODELS[0]))
+	thinking_level_var.set(settings.get("thinking_level", "medium"))
 	model_fallback_order_var.set(settings.get("model_fallback_order", "|".join(MODELS)))
 	thread_var.set(settings.get("threads", "3"))
 	chunk_size_var.set(settings.get("chunk_size", str(CHUNK_SIZE)))
@@ -1247,7 +1257,17 @@ def extract_json_from_response(raw_text):
 	return None
 
 
-def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens):
+def is_gemini_v3_or_above(model_name):
+	if not model_name:
+		return False
+	match = re.match(r'^gemini-(\d+(?:\.\d+)?)', model_name.lower())
+	if match:
+		version = float(match.group(1))
+		return version >= 3.0
+	return False
+
+
+def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens, thinking_level=None):
 	"""Translate text using Gemini. Returns (text, input_tokens, output_tokens, error_code).
 	Error codes: None = success, 'QUOTA' = rate limit exceeded, 'ERROR' = other error.
 	"""
@@ -1272,75 +1292,146 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		except Exception:
 			return ""
 
-	try:
-		model = genai.GenerativeModel(model_name=model_id)
-		full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
-		response = model.generate_content(
-			full_prompt,
-			generation_config=genai.types.GenerationConfig(
+	api_key = ""
+	if "api_key_entry" in globals() and api_key_entry.winfo_exists():
+		api_key = api_key_entry.get().strip()
+
+	if is_gemini_v3_or_above(model_id) and google_genai is not None:
+		try:
+			client = google_genai.Client(api_key=api_key)
+			full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
+			
+			if thinking_level is None:
+				if "thinking_level_var" in globals():
+					thinking_level = thinking_level_var.get().lower().strip()
+				else:
+					thinking_level = "medium"
+			if thinking_level not in ["minimal", "low", "medium", "high"]:
+				thinking_level = "medium"
+				
+			config = genai_types.GenerateContentConfig(
 				temperature=temperature,
 				max_output_tokens=max_output_tokens,
-			),
-		)
+				thinking_config=genai_types.ThinkingConfig(
+					thinking_level=thinking_level
+				)
+			)
+			response = client.models.generate_content(
+				model=model_id,
+				contents=full_prompt,
+				config=config
+			)
 
-		usage = getattr(response, "usage_metadata", None)
-		if usage is None:
-			usage_data = {}
-		elif isinstance(usage, dict):
-			usage_data = usage
-		elif hasattr(usage, "to_dict"):
-			usage_data = usage.to_dict()
-		else:
-			usage_data = {
-				"prompt_token_count": getattr(usage, "prompt_token_count", None),
-				"candidates_token_count": getattr(usage, "candidates_token_count", None),
-			}
+			usage = getattr(response, "usage_metadata", None)
+			if usage is None:
+				usage_data = {}
+			elif isinstance(usage, dict):
+				usage_data = usage
+			elif hasattr(usage, "to_dict"):
+				usage_data = usage.to_dict()
+			else:
+				usage_data = {
+					"prompt_token_count": getattr(usage, "prompt_token_count", None),
+					"candidates_token_count": getattr(usage, "candidates_token_count", None),
+				}
 
-		input_tokens = _usage_get(usage_data, ["prompt_token_count"])
-		output_tokens = _usage_get(usage_data, ["candidates_token_count"])
+			input_tokens = _usage_get(usage_data, ["prompt_token_count"])
+			output_tokens = _usage_get(usage_data, ["candidates_token_count"])
 
-		# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
-		response_text = ""
-		try:
-			response_text = _safe_str(getattr(response, "text", "")).strip()
-		except Exception:
 			response_text = ""
+			try:
+				response_text = _safe_str(getattr(response, "text", "")).strip()
+			except Exception:
+				response_text = ""
 
-		if response_text:
-			return response_text, input_tokens, output_tokens, None
+			if response_text:
+				return response_text, input_tokens, output_tokens, None
 
-		candidates = getattr(response, "candidates", None) or []
-		for candidate in candidates:
-			content = getattr(candidate, "content", None)
-			parts = getattr(content, "parts", None) or []
-			texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
-			if texts:
-				return "\n".join(texts).strip(), input_tokens, output_tokens, None
+			candidates = getattr(response, "candidates", None) or []
+			for candidate in candidates:
+				content = getattr(candidate, "content", None)
+				parts = getattr(content, "parts", None) or []
+				texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
+				if texts:
+					return "\n".join(texts).strip(), input_tokens, output_tokens, None
 
-		prompt_feedback = getattr(response, "prompt_feedback", None)
-		block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
-		block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
-		finish_reason = ""
-		if candidates:
-			finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
+			raise RuntimeError("Gemini không trả về nội dung hợp lệ.")
+		except Exception as e:
+			error_str = str(e)
+			if is_quota_exceeded_error(error_str):
+				return None, 0, 0, 'QUOTA'
+			else:
+				return None, 0, 0, 'ERROR'
+	else:
+		try:
+			model = genai.GenerativeModel(model_name=model_id)
+			full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
+			response = model.generate_content(
+				full_prompt,
+				generation_config=genai.types.GenerationConfig(
+					temperature=temperature,
+					max_output_tokens=max_output_tokens,
+				),
+			)
 
-		meta = []
-		meta.append(f"candidates={len(candidates)}")
-		if finish_reason:
-			meta.append(f"finish_reason={finish_reason}")
-		if block_reason:
-			meta.append(f"block_reason={block_reason}")
-		if block_message:
-			meta.append(f"block_message={block_message}")
+			usage = getattr(response, "usage_metadata", None)
+			if usage is None:
+				usage_data = {}
+			elif isinstance(usage, dict):
+				usage_data = usage
+			elif hasattr(usage, "to_dict"):
+				usage_data = usage.to_dict()
+			else:
+				usage_data = {
+					"prompt_token_count": getattr(usage, "prompt_token_count", None),
+					"candidates_token_count": getattr(usage, "candidates_token_count", None),
+				}
 
-		raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
+			input_tokens = _usage_get(usage_data, ["prompt_token_count"])
+			output_tokens = _usage_get(usage_data, ["candidates_token_count"])
 
-	except Exception as e:
-		error_str = str(e)
-		if is_quota_exceeded_error(error_str):
-			return None, 0, 0, 'QUOTA'
-		else:
-			return None, 0, 0, 'ERROR'
+			# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
+			response_text = ""
+			try:
+				response_text = _safe_str(getattr(response, "text", "")).strip()
+			except Exception:
+				response_text = ""
+
+			if response_text:
+				return response_text, input_tokens, output_tokens, None
+
+			candidates = getattr(response, "candidates", None) or []
+			for candidate in candidates:
+				content = getattr(candidate, "content", None)
+				parts = getattr(content, "parts", None) or []
+				texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
+				if texts:
+					return "\n".join(texts).strip(), input_tokens, output_tokens, None
+
+			prompt_feedback = getattr(response, "prompt_feedback", None)
+			block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
+			block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
+			finish_reason = ""
+			if candidates:
+				finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
+
+			meta = []
+			meta.append(f"candidates={len(candidates)}")
+			if finish_reason:
+				meta.append(f"finish_reason={finish_reason}")
+			if block_reason:
+				meta.append(f"block_reason={block_reason}")
+			if block_message:
+				meta.append(f"block_message={block_message}")
+
+			raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
+
+		except Exception as e:
+			error_str = str(e)
+			if is_quota_exceeded_error(error_str):
+				return None, 0, 0, 'QUOTA'
+			else:
+				return None, 0, 0, 'ERROR'
 
 
 def build_consistency_analysis_prompt(chunked_translated_text):
@@ -1427,7 +1518,7 @@ def run_consistency_check():
 
 			add_log(f"🧭 Bắt đầu kiểm tra nhất quán xưng hô cho {len(chunks)} chunk...")
 			analysis_prompt = build_consistency_analysis_prompt(chunked_content)
-			raw_result, input_tokens, output_tokens = translate_with_gemini(
+			raw_result, input_tokens, output_tokens, _ = translate_with_gemini(
 				model_id,
 				analysis_prompt,
 				"",
@@ -1807,7 +1898,7 @@ def scan_story():
 
 			for seg_idx, segment in enumerate(scan_segments, 1):
 				add_log(f"🔎 Quét đoạn mẫu {seg_idx}/{len(scan_segments)}...")
-				raw_result, _, _ = translate_with_gemini(model_id, scan_prompt, segment, temperature, 3072)
+				raw_result, _, _, _ = translate_with_gemini(model_id, scan_prompt, segment, temperature, 3072)
 				if not raw_result or "không có" in raw_result.lower():
 					continue
 
@@ -3161,6 +3252,7 @@ quality_info_text.pack(anchor="w", padx=8, pady=8)
 input_path = tk.StringVar()
 output_path = tk.StringVar()
 model_var = tk.StringVar(value=MODELS[0])
+thinking_level_var = tk.StringVar(value="medium")
 model_fallback_order_var = tk.StringVar(value="|".join(MODELS))  # Model order for fallback when quota exceeded
 fallback_order_hint_var = tk.StringVar(value="Thứ tự fallback hiệu lực: --")
 thread_var = tk.StringVar(value="3")
@@ -3189,6 +3281,14 @@ def update_fallback_hint(*args):
 		fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(order)}")
 	else:
 		fallback_order_hint_var.set("Thứ tự fallback hiệu lực: --")
+
+
+def update_thinking_level_state(*args):
+	model_name = model_var.get()
+	if is_gemini_v3_or_above(model_name):
+		thinking_level_cb.config(state="readonly")
+	else:
+		thinking_level_cb.config(state="disabled")
 
 entry_opts = {
 	"bg": PALETTE["input_bg"],
@@ -3534,8 +3634,8 @@ model_frame.grid(row=2, column=0, sticky="ew", pady=(2, 8))
 model_frame.columnconfigure(0, weight=1)
 model_cb = ttk.Combobox(model_frame, values=MODELS, textvariable=model_var, state="readonly")
 model_cb.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-model_cb.bind("<<ComboboxSelected>>", update_fallback_hint)
-model_var.trace_add("write", update_fallback_hint)
+model_cb.bind("<<ComboboxSelected>>", lambda e: [update_fallback_hint(), update_thinking_level_state()])
+model_var.trace_add("write", lambda *args: [update_fallback_hint(), update_thinking_level_state()])
 model_fallback_order_var.trace_add("write", update_fallback_hint)
 
 tk.Button(
@@ -3558,8 +3658,24 @@ tk.Label(
 	font=("Segoe UI", 8, "italic"),
 ).grid(row=3, column=0, sticky="w", pady=(0, 6))
 
+tk.Label(
+	card_config,
+	text="Thinking Level (chỉ áp dụng từ Gemini 3 trở đi)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=4, column=0, sticky="w")
+
+thinking_level_cb = ttk.Combobox(
+	card_config,
+	values=["minimal", "low", "medium", "high"],
+	textvariable=thinking_level_var,
+	state="readonly"
+)
+thinking_level_cb.grid(row=5, column=0, sticky="ew", pady=(2, 8))
+
 perf_frame = tk.Frame(card_config, bg=PALETTE["panel"])
-perf_frame.grid(row=4, column=0, sticky="ew", pady=(2, 8))
+perf_frame.grid(row=6, column=0, sticky="ew", pady=(2, 8))
 for col in range(3):
 	perf_frame.columnconfigure(col, weight=1)
 
@@ -3599,10 +3715,10 @@ tk.Label(
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=5, column=0, sticky="w")
+).grid(row=7, column=0, sticky="w")
 
 split_mode_frame = tk.Frame(card_config, bg=PALETTE["panel"])
-split_mode_frame.grid(row=6, column=0, sticky="w", pady=(2, 8))
+split_mode_frame.grid(row=8, column=0, sticky="w", pady=(2, 8))
 
 tk.Radiobutton(
 	split_mode_frame,
@@ -3634,7 +3750,7 @@ tk.Label(
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=7, column=0, sticky="w")
+).grid(row=9, column=0, sticky="w")
 temp_scale = ttk.Scale(
 	card_config,
 	from_=0.0,
@@ -3644,7 +3760,7 @@ temp_scale = ttk.Scale(
 	length=200,
 	style="Accent.Horizontal.TScale",
 )
-temp_scale.grid(row=8, column=0, sticky="ew")
+temp_scale.grid(row=10, column=0, sticky="ew")
 temp_label = tk.Label(
 	card_config,
 	textvariable=temp_var,
@@ -3652,7 +3768,7 @@ temp_label = tk.Label(
 	fg=PALETTE["accent"],
 	font=("Segoe UI", 10, "bold"),
 )
-temp_label.grid(row=8, column=1, padx=(8, 0))
+temp_label.grid(row=10, column=1, padx=(8, 0))
 
 
 def update_temp_label(event=None):
@@ -4057,6 +4173,10 @@ except NameError:
 	pass
 try:
 	refresh_cost_stats()
+except NameError:
+	pass
+try:
+	update_thinking_level_state()
 except NameError:
 	pass
 
