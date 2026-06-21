@@ -14,16 +14,12 @@ import mimetypes
 import webbrowser
 
 try:
-	import google.generativeai as genai
-except ImportError:
-	genai = None
-
-try:
-	from google import genai as google_genai
+	from google import genai
 	from google.genai import types as genai_types
 except ImportError:
-	google_genai = None
+	genai = None
 	genai_types = None
+
 
 try:
 	from google.oauth2.credentials import Credentials
@@ -1296,11 +1292,19 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 	if "api_key_entry" in globals() and api_key_entry.winfo_exists():
 		api_key = api_key_entry.get().strip()
 
-	if is_gemini_v3_or_above(model_id) and google_genai is not None:
-		try:
-			client = google_genai.Client(api_key=api_key)
-			full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
-			
+	if genai is None:
+		return None, 0, 0, 'ERROR'
+
+	try:
+		client = genai.Client(api_key=api_key)
+		full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
+		
+		config_args = {
+			"temperature": temperature,
+			"max_output_tokens": max_output_tokens,
+		}
+		
+		if is_gemini_v3_or_above(model_id):
 			if thinking_level is None:
 				if "thinking_level_var" in globals():
 					thinking_level = thinking_level_var.get().lower().strip()
@@ -1309,129 +1313,74 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 			if thinking_level not in ["minimal", "low", "medium", "high"]:
 				thinking_level = "medium"
 				
-			config = genai_types.GenerateContentConfig(
-				temperature=temperature,
-				max_output_tokens=max_output_tokens,
-				thinking_config=genai_types.ThinkingConfig(
-					thinking_level=thinking_level
-				)
+			config_args["thinking_config"] = genai_types.ThinkingConfig(
+				thinking_level=thinking_level
 			)
-			response = client.models.generate_content(
-				model=model_id,
-				contents=full_prompt,
-				config=config
-			)
+			
+		config = genai_types.GenerateContentConfig(**config_args)
+		response = client.models.generate_content(
+			model=model_id,
+			contents=full_prompt,
+			config=config
+		)
 
-			usage = getattr(response, "usage_metadata", None)
-			if usage is None:
-				usage_data = {}
-			elif isinstance(usage, dict):
-				usage_data = usage
-			elif hasattr(usage, "to_dict"):
-				usage_data = usage.to_dict()
-			else:
-				usage_data = {
-					"prompt_token_count": getattr(usage, "prompt_token_count", None),
-					"candidates_token_count": getattr(usage, "candidates_token_count", None),
-				}
+		usage = getattr(response, "usage_metadata", None)
+		if usage is None:
+			usage_data = {}
+		elif isinstance(usage, dict):
+			usage_data = usage
+		elif hasattr(usage, "to_dict"):
+			usage_data = usage.to_dict()
+		else:
+			usage_data = {
+				"prompt_token_count": getattr(usage, "prompt_token_count", None),
+				"candidates_token_count": getattr(usage, "candidates_token_count", None),
+			}
 
-			input_tokens = _usage_get(usage_data, ["prompt_token_count"])
-			output_tokens = _usage_get(usage_data, ["candidates_token_count"])
+		input_tokens = _usage_get(usage_data, ["prompt_token_count"])
+		output_tokens = _usage_get(usage_data, ["candidates_token_count"])
 
-			response_text = ""
-			try:
-				response_text = _safe_str(getattr(response, "text", "")).strip()
-			except Exception:
-				response_text = ""
-
-			if response_text:
-				return response_text, input_tokens, output_tokens, None
-
-			candidates = getattr(response, "candidates", None) or []
-			for candidate in candidates:
-				content = getattr(candidate, "content", None)
-				parts = getattr(content, "parts", None) or []
-				texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
-				if texts:
-					return "\n".join(texts).strip(), input_tokens, output_tokens, None
-
-			raise RuntimeError("Gemini không trả về nội dung hợp lệ.")
-		except Exception as e:
-			error_str = str(e)
-			if is_quota_exceeded_error(error_str):
-				return None, 0, 0, 'QUOTA'
-			else:
-				return None, 0, 0, 'ERROR'
-	else:
+		response_text = ""
 		try:
-			model = genai.GenerativeModel(model_name=model_id)
-			full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
-			response = model.generate_content(
-				full_prompt,
-				generation_config=genai.types.GenerationConfig(
-					temperature=temperature,
-					max_output_tokens=max_output_tokens,
-				),
-			)
-
-			usage = getattr(response, "usage_metadata", None)
-			if usage is None:
-				usage_data = {}
-			elif isinstance(usage, dict):
-				usage_data = usage
-			elif hasattr(usage, "to_dict"):
-				usage_data = usage.to_dict()
-			else:
-				usage_data = {
-					"prompt_token_count": getattr(usage, "prompt_token_count", None),
-					"candidates_token_count": getattr(usage, "candidates_token_count", None),
-				}
-
-			input_tokens = _usage_get(usage_data, ["prompt_token_count"])
-			output_tokens = _usage_get(usage_data, ["candidates_token_count"])
-
-			# response.text có thể ném lỗi khi API không trả candidate hợp lệ.
+			response_text = _safe_str(getattr(response, "text", "")).strip()
+		except Exception:
 			response_text = ""
-			try:
-				response_text = _safe_str(getattr(response, "text", "")).strip()
-			except Exception:
-				response_text = ""
 
-			if response_text:
-				return response_text, input_tokens, output_tokens, None
+		if response_text:
+			return response_text, input_tokens, output_tokens, None
 
-			candidates = getattr(response, "candidates", None) or []
-			for candidate in candidates:
-				content = getattr(candidate, "content", None)
-				parts = getattr(content, "parts", None) or []
-				texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
-				if texts:
-					return "\n".join(texts).strip(), input_tokens, output_tokens, None
+		candidates = getattr(response, "candidates", None) or []
+		for candidate in candidates:
+			content = getattr(candidate, "content", None)
+			parts = getattr(content, "parts", None) or []
+			texts = [getattr(p, "text", "") for p in parts if getattr(p, "text", "")]
+			if texts:
+				return "\n".join(texts).strip(), input_tokens, output_tokens, None
 
-			prompt_feedback = getattr(response, "prompt_feedback", None)
-			block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
-			block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
-			finish_reason = ""
-			if candidates:
-				finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
+		prompt_feedback = getattr(response, "prompt_feedback", None)
+		block_reason = _safe_str(getattr(prompt_feedback, "block_reason", ""))
+		block_message = _safe_str(getattr(prompt_feedback, "block_reason_message", ""))
+		finish_reason = ""
+		if candidates:
+			finish_reason = _safe_str(getattr(candidates[0], "finish_reason", ""))
 
-			meta = []
-			meta.append(f"candidates={len(candidates)}")
-			if finish_reason:
-				meta.append(f"finish_reason={finish_reason}")
-			if block_reason:
-				meta.append(f"block_reason={block_reason}")
-			if block_message:
-				meta.append(f"block_message={block_message}")
+		meta = []
+		meta.append(f"candidates={len(candidates)}")
+		if finish_reason:
+			meta.append(f"finish_reason={finish_reason}")
+		if block_reason:
+			meta.append(f"block_reason={block_reason}")
+		if block_message:
+			meta.append(f"block_message={block_message}")
 
-			raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
+		raise RuntimeError("Gemini không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
 
-		except Exception as e:
-			error_str = str(e)
-			if is_quota_exceeded_error(error_str):
-				return None, 0, 0, 'QUOTA'
-			else:
-				return None, 0, 0, 'ERROR'
+	except Exception as e:
+		error_str = str(e)
+		if is_quota_exceeded_error(error_str):
+			return None, 0, 0, 'QUOTA'
+		else:
+			return None, 0, 0, 'ERROR'
 
 
 def build_consistency_analysis_prompt(chunked_translated_text):
@@ -1475,7 +1424,7 @@ def run_consistency_check():
 	if genai is None:
 		messagebox.showerror(
 			"Thiếu thư viện",
-			"Chưa cài thư viện google-generativeai.\\nCài bằng lệnh: pip install google-generativeai",
+			"Chưa cài thư viện google-genai.\nCài bằng lệnh: pip install google-genai",
 		)
 		return
 
@@ -1498,7 +1447,6 @@ def run_consistency_check():
 		return
 
 	model_id = model_var.get()
-	genai.configure(api_key=api_key)
 	consistency_run_btn.config(state="disabled")
 	consistency_status_var.set("Đang phân tích mâu thuẫn xưng hô...")
 
@@ -1706,7 +1654,7 @@ def validate_inputs():
 	if genai is None:
 		messagebox.showerror(
 			"Thiếu thư viện",
-			"Chưa cài thư viện google-generativeai.\nCài bằng lệnh: pip install google-generativeai",
+			"Chưa cài thư viện google-genai.\nCài bằng lệnh: pip install google-genai",
 		)
 		return False
 
@@ -1860,7 +1808,6 @@ def scan_story():
 		return
 	
 	api_key = api_key_entry.get().strip()
-	genai.configure(api_key=api_key)
 	in_file = input_path.get()
 	chunk_size = int(chunk_size_var.get())
 	model_id = model_var.get()
@@ -1956,7 +1903,6 @@ def start_translation():
 	pause_event.set()
 
 	api_key = api_key_entry.get().strip()
-	genai.configure(api_key=api_key)
 	output_path.set(build_default_output_path(input_path.get(), model_var.get()))
 	add_log(f"📄 File output mặc định: {output_path.get()}")
 
@@ -2335,7 +2281,7 @@ def copy_to_clipboard():
 def translate_clipboard_text():
 	"""Dịch text từ clipboard (1 chunk đơn lẻ, không queue)."""
 	if genai is None:
-		messagebox.showerror("Lỗi", "Chưa cài google-generativeai")
+		messagebox.showerror("Lỗi", "Chưa cài google-genai")
 		return
 	
 	api_key = api_key_entry.get().strip()
@@ -2348,7 +2294,6 @@ def translate_clipboard_text():
 		messagebox.showwarning("Cảnh báo", "Vui lòng paste text vào trước!")
 		return
 	
-	genai.configure(api_key=api_key)
 	quick_status_var.set("⏳ Đang dịch...")
 	
 	def _worker():
@@ -2985,7 +2930,6 @@ def open_regenerate_dialog():
 		
 		def run():
 			try:
-				genai.configure(api_key=api_key)
 				_, result = translate_chunk(model, full_prompt, chunk_text, index, get_checkpoint_path(input_path.get()), temperature, max_tokens)
 				
 				dialog.after(0, lambda: [
@@ -4163,7 +4107,7 @@ root.protocol("WM_DELETE_WINDOW", on_closing)
 add_log("📂 Đã tải cài đặt từ lần sử dụng trước.")
 add_log("🔐 API Key được mã hóa khi lưu, chỉ hoạt động trên máy này.")
 if genai is None:
-	add_log("⚠️ Thiếu thư viện google-generativeai. Cài bằng: pip install google-generativeai")
+	add_log("⚠️ Thiếu thư viện google-genai. Cài bằng: pip install google-genai")
 if not ensure_drive_dependencies():
 	add_log("⚠️ Thiếu thư viện Google Drive. Cài bằng: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
 refresh_history_display()

@@ -11,11 +11,11 @@
 ## 2) Yêu cầu môi trường
 - Windows + Python 3.10+ (khuyến nghị)
 - Thư viện Python:
-  - `google-generativeai`
+  - `google-genai`
 
 Cài thư viện:
 ```powershell
-pip install google-generativeai
+pip install google-genai
 ```
 
 ## 3) Cách chạy app
@@ -85,10 +85,10 @@ Trong lúc dịch:
 - `*.resume.json`: checkpoint theo từng file truyện
 
 ## 10) Lỗi thường gặp & cách xử lý
-### Báo thiếu thư viện `google-generativeai`
+### Báo thiếu thư viện `google-genai`
 - Cài lại:
 ```powershell
-pip install google-generativeai
+pip install google-genai
 ```
 
 ### Gemini trả về rỗng / lỗi API / giới hạn quota
