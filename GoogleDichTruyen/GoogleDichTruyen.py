@@ -1380,7 +1380,7 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		if is_quota_exceeded_error(error_str):
 			return None, 0, 0, 'QUOTA'
 		else:
-			return None, 0, 0, 'ERROR'
+			return None, 0, 0, error_str
 
 
 def build_consistency_analysis_prompt(chunked_translated_text):
@@ -1582,8 +1582,8 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 					time.sleep(2 + attempt * 2)
 					continue
 			
-			if error_code == 'ERROR':
-				last_error = "Lỗi API"
+			if error_code:
+				last_error = f"Lỗi API: {error_code}"
 				add_log(f"⚠️ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
 				time.sleep(2 + attempt * 2)
 				continue
