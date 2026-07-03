@@ -213,6 +213,7 @@ def load_settings():
 		"input_file": "",
 		"output_file": "",
 		"model": MODELS[0],
+		"quick_model": MODELS[0],
 		"thinking_level": "medium",
 		"model_fallback_order": "|".join(MODELS),
 		"threads": "3",
@@ -253,6 +254,7 @@ def save_settings():
 		"input_file": input_path.get(),
 		"output_file": output_path.get(),
 		"model": model_var.get(),
+		"quick_model": quick_model_var.get(),
 		"thinking_level": thinking_level_var.get(),
 		"model_fallback_order": model_fallback_order_var.get(),
 		"threads": thread_var.get(),
@@ -284,6 +286,7 @@ def apply_settings(settings):
 	input_path.set(settings.get("input_file", ""))
 	output_path.set(settings.get("output_file", ""))
 	model_var.set(settings.get("model", MODELS[0]))
+	quick_model_var.set(settings.get("quick_model", MODELS[0]))
 	thinking_level_var.set(settings.get("thinking_level", "medium"))
 	model_fallback_order_var.set(settings.get("model_fallback_order", "|".join(MODELS)))
 	thread_var.set(settings.get("threads", "3"))
@@ -1077,10 +1080,6 @@ def apply_theme():
 			table.tag_configure("odd", background=PALETTE["input_bg"])
 			table.tag_configure("even", background=PALETTE["panel"])
 
-	if "consistency_table" in globals():
-		consistency_table.tag_configure("odd", background=PALETTE["input_bg"])
-		consistency_table.tag_configure("even", background=PALETTE["panel"])
-
 	if "cost_tree_table" in globals():
 		cost_tree_table.tag_configure("month_row", background=PALETTE["accent"], foreground="#000000", font=("Segoe UI", 10, "bold"))
 		cost_tree_table.tag_configure("week_row", background=PALETTE["input_bg"], foreground=PALETTE["text"])
@@ -1090,9 +1089,6 @@ def apply_theme():
 
 	if "requests_hint_label" in globals():
 		requests_hint_label.configure(bg=PALETTE["panel"], fg="#000000")
-
-	if "consistency_hint_label" in globals():
-		consistency_hint_label.configure(bg=PALETTE["panel"], fg=PALETTE["text_muted"])
 
 	main_container.configure(bg=PALETTE["bg"])
 	main_frame.configure(bg=PALETTE["bg"])
@@ -1383,164 +1379,7 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 			return None, 0, 0, error_str
 
 
-def build_consistency_analysis_prompt(chunked_translated_text):
-	return (
-		"Bạn là biên tập viên kiểm định bản dịch truyện Trung -> Việt.\\n"
-		"Nhiệm vụ: tìm MÂU THUẪN XƯNG HÔ, vai vế, đại từ nhân xưng, và cách gọi giữa các chunk.\\n"
-		"Chỉ báo lỗi có căn cứ rõ ràng trong nội dung. Không bịa.\\n\\n"
-		"Yêu cầu phân tích:\\n"
-		"1) Chỉ ra các cặp chunk bị lệch xưng hô (vd: cùng quan hệ mà lúc 'huynh-đệ', lúc 'anh-em', hoặc đổi ngôi vô lý).\\n"
-		"2) Chỉ ra lỗi sai vai vế/tôn ti (sư phụ, sư huynh, công tử, nô tỳ...).\\n"
-		"3) Chỉ ra chỗ đổi danh xưng của cùng một nhân vật gây mâu thuẫn bối cảnh.\\n"
-		"4) Gợi ý chuẩn hóa ngắn gọn cho từng lỗi.\\n\\n"
-		"BẮT BUỘC trả về JSON hợp lệ, không markdown, theo schema:\\n"
-		"{\\n"
-		"  \"summary\": {\\n"
-		"    \"total_chunks\": <int>,\\n"
-		"    \"issues_found\": <int>,\\n"
-		"    \"overall_risk\": \"low|medium|high\"\\n"
-		"  },\\n"
-		"  \"issues\": [\\n"
-		"    {\\n"
-		"      \"id\": \"I1\",\\n"
-		"      \"severity\": \"low|medium|high\",\\n"
-		"      \"type\": \"xung_ho|vai_ve|danh_xung\",\\n"
-		"      \"chunks\": [<int>, <int>],\\n"
-		"      \"explanation\": \"mô tả lỗi ngắn gọn\",\\n"
-		"      \"evidence\": [\\n"
-		"        {\"chunk\": <int>, \"quote\": \"trích dẫn ngắn\"}\\n"
-		"      ],\\n"
-		"      \"suggestion\": \"đề xuất chuẩn hóa\"\\n"
-		"    }\\n"
-		"  ]\\n"
-		"}\\n\\n"
-		"Nếu không có lỗi, trả issues = [] và issues_found = 0.\\n\\n"
-		"DỮ LIỆU BẢN DỊCH (đã chia chunk):\\n"
-		f"{chunked_translated_text}"
-	)
 
-
-def run_consistency_check():
-	if genai is None:
-		messagebox.showerror(
-			"Thiếu thư viện",
-			"Chưa cài thư viện google-genai.\nCài bằng lệnh: pip install google-genai",
-		)
-		return
-
-	api_key = api_key_entry.get().strip()
-	if not api_key:
-		messagebox.showerror("Lỗi", "Vui lòng nhập Gemini API Key trước khi kiểm tra.")
-		return
-
-	selected_output_file = consistency_file_var.get().strip() or output_path.get().strip()
-	if not selected_output_file or not os.path.exists(selected_output_file):
-		messagebox.showerror("Lỗi", "Vui lòng chọn file bản dịch output hợp lệ để kiểm tra.")
-		return
-
-	try:
-		analysis_chunk_size = int(chunk_size_var.get())
-		temp_for_analysis = float(temp_var.get())
-		max_tokens_for_analysis = int(max_output_tokens_var.get())
-	except Exception:
-		messagebox.showerror("Lỗi", "Thông số chunk/temperature/max tokens không hợp lệ.")
-		return
-
-	model_id = model_var.get()
-	consistency_run_btn.config(state="disabled")
-	consistency_status_var.set("Đang phân tích mâu thuẫn xưng hô...")
-
-	def _worker():
-		try:
-			with open(selected_output_file, "r", encoding="utf-8") as f:
-				translated_text = f.read()
-
-			if not translated_text.strip():
-				raise RuntimeError("File output rỗng, không có nội dung để phân tích.")
-
-			chunks = split_text(translated_text, size=analysis_chunk_size, split_mode=chunk_split_mode_var.get())
-			chunk_blocks = []
-			for idx, chunk in enumerate(chunks, 1):
-				chunk_blocks.append(f"[CHUNK {idx}]\\n{chunk.strip()}\\n[/CHUNK {idx}]")
-			chunked_content = "\\n\\n".join(chunk_blocks)
-
-			add_log(f"🧭 Bắt đầu kiểm tra nhất quán xưng hô cho {len(chunks)} chunk...")
-			analysis_prompt = build_consistency_analysis_prompt(chunked_content)
-			raw_result, input_tokens, output_tokens, _ = translate_with_gemini(
-				model_id,
-				analysis_prompt,
-				"",
-				temp_for_analysis,
-				max_tokens_for_analysis,
-			)
-
-			parsed = extract_json_from_response(raw_result)
-			if not parsed:
-				parsed = {
-					"summary": {
-						"total_chunks": len(chunks),
-						"issues_found": 0,
-						"overall_risk": "unknown",
-					},
-					"issues": [],
-				}
-
-			def _update_ui():
-				for row_id in consistency_table.get_children():
-					consistency_table.delete(row_id)
-
-				summary = parsed.get("summary", {}) if isinstance(parsed, dict) else {}
-				issues = parsed.get("issues", []) if isinstance(parsed, dict) else []
-				if not isinstance(issues, list):
-					issues = []
-
-				for issue in issues:
-					severity = str(issue.get("severity", "medium"))
-					issue_type = str(issue.get("type", "xung_ho"))
-					chunks_value = issue.get("chunks", [])
-					if isinstance(chunks_value, list):
-						chunk_text = ", ".join([str(x) for x in chunks_value])
-					else:
-						chunk_text = str(chunks_value)
-					explanation = str(issue.get("explanation", "")).strip()
-					suggestion = str(issue.get("suggestion", "")).strip()
-					row_tag = "even" if (len(consistency_table.get_children()) % 2 == 0) else "odd"
-
-					consistency_table.insert(
-						"",
-						tk.END,
-						values=(severity.upper(), chunk_text, issue_type, explanation, suggestion),
-						tags=(row_tag,),
-					)
-
-				issues_found = summary.get("issues_found", len(issues)) if isinstance(summary, dict) else len(issues)
-				risk = summary.get("overall_risk", "unknown") if isinstance(summary, dict) else "unknown"
-				consistency_status_var.set(
-					f"Đã phân tích xong: {issues_found} lỗi nghi ngờ, mức rủi ro {risk}."
-				)
-
-				consistency_raw_text.config(state="normal")
-				consistency_raw_text.delete("1.0", tk.END)
-				consistency_raw_text.insert(tk.END, raw_result)
-				consistency_raw_text.config(state="disabled")
-
-				add_log(
-					f"✅ Hoàn tất kiểm tra xưng hô. Input token: {input_tokens:,}, Output token: {output_tokens:,}, số lỗi: {issues_found}"
-				)
-				consistency_run_btn.config(state="normal")
-
-			root.after(0, _update_ui)
-
-		except Exception as e:
-			def _show_error():
-				consistency_run_btn.config(state="normal")
-				consistency_status_var.set("Kiểm tra thất bại.")
-				add_log(f"🛑 Lỗi kiểm tra xưng hô: {e}")
-				messagebox.showerror("Lỗi kiểm tra", f"Không thể phân tích bản dịch: {e}")
-
-			root.after(0, _show_error)
-
-	threading.Thread(target=_worker, daemon=True).start()
 
 
 # ================= DỊCH 1 CHUNK =================
@@ -1605,12 +1444,7 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			stats["total_output_cost_usd"] += output_cost
 			stats["total_cost_usd"] = stats["total_input_cost_usd"] + stats["total_output_cost_usd"]
 
-			# Quality Check
-			quality_result = check_output_quality(chunk, translated_text, index)
-			quality_result["output"] = translated_text
-			quality_check_results.append(quality_result)
-			quality_msg = log_quality_check(quality_result)
-			add_log(quality_msg)
+
 
 			add_log(f"✅ Hoàn thành đoạn {index + 1}")
 			return index, translated_text
@@ -2148,49 +1982,7 @@ def process_translation_logic():
 		is_stopped = True
 
 
-# ================= 1. QUALITY CHECKS - KIỂM TRA CHẤT LƯỢNG =================
-quality_check_results = []
 
-def check_output_quality(chunk_input: str, chunk_output: str, index: int) -> dict:
-	"""Kiểm tra chất lượng output dịch. Trả về dict với các kiểm tra."""
-	checks = {
-		"index": index,
-		"is_empty": len(chunk_output.strip()) == 0,
-		"length_ratio": len(chunk_output) / max(len(chunk_input), 1),
-		"is_too_short": len(chunk_output.split()) < 10,
-		"has_duplicates": len(set(chunk_output.split())) < len(chunk_output.split()) * 0.5,
-	}
-	
-	# Kiểm tra xem output có lặp lại câu không
-	sentences = [s.strip() for s in chunk_output.split('.') if s.strip()]
-	if len(sentences) > 1:
-		checks["duplicate_sentences"] = len(sentences) != len(set(sentences))
-	else:
-		checks["duplicate_sentences"] = False
-	
-	return checks
-
-def log_quality_check(checks: dict) -> str:
-	"""Format kết quả kiểm tra chất lượng thành chuỗi log."""
-	index = checks["index"]
-	
-	if checks["is_empty"]:
-		return f"🔴 Chunk {index + 1}: Output trống!"
-	
-	ratio = checks["length_ratio"]
-	if ratio < 0.6:
-		return f"⚠️  Chunk {index + 1}: Output quá ngắn ({ratio:.1%} so với input)"
-	
-	if checks["is_too_short"]:
-		return f"⚠️  Chunk {index + 1}: Output chỉ có {len(checks.get('output', '').split())} từ"
-	
-	if checks["duplicate_sentences"]:
-		return f"⚠️  Chunk {index + 1}: Có câu lặp lại"
-	
-	if checks["has_duplicates"]:
-		return f"⚠️  Chunk {index + 1}: Từ lặp quá nhiều"
-	
-	return f"✅ Chunk {index + 1}: OK"
 
 
 # ================= 2. DIFF VIEWER - SO SÁNH FILE =================
@@ -2298,7 +2090,7 @@ def translate_clipboard_text():
 	
 	def _worker():
 		try:
-			model_id = model_var.get()
+			model_id = quick_model_var.get()
 			temperature = float(temp_var.get())
 			max_tokens = int(max_output_tokens_var.get())
 			prompt = prompt_text.get("1.0", tk.END).strip()
@@ -2523,8 +2315,6 @@ translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 preview_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 quick_translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 diff_tab = tk.Frame(tabs, bg=PALETTE["bg"])
-quality_tab = tk.Frame(tabs, bg=PALETTE["bg"])
-consistency_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 history_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 requests_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 stats_tab = tk.Frame(tabs, bg=PALETTE["bg"])
@@ -2533,8 +2323,6 @@ tabs.add(translate_tab, text="🚀 Dịch truyện")
 tabs.add(preview_tab, text="🔍 Xem Chunk")
 tabs.add(quick_translate_tab, text="📋 Dịch nhanh")
 tabs.add(diff_tab, text="🔄 Diff Viewer")
-tabs.add(quality_tab, text="✅ Kiểm tra chất lượng")
-tabs.add(consistency_tab, text="🧭 Kiểm tra xưng hô")
 tabs.add(history_tab, text="🗂️ Lịch sử dịch")
 tabs.add(requests_tab, text="📈 Request/phút")
 tabs.add(stats_tab, text="💰 Thống kê chi phí")
@@ -2549,15 +2337,10 @@ quick_translate_tab.rowconfigure(2, weight=1)
 diff_tab.columnconfigure(0, weight=1)
 diff_tab.rowconfigure(1, weight=1)
 
-quality_tab.columnconfigure(0, weight=1)
-quality_tab.rowconfigure(1, weight=1)
-
 history_tab.columnconfigure(0, weight=1)
 history_tab.rowconfigure(1, weight=1)
 requests_tab.columnconfigure(0, weight=1)
 requests_tab.rowconfigure(1, weight=1)
-consistency_tab.columnconfigure(0, weight=1)
-consistency_tab.rowconfigure(1, weight=1)
 
 # ================= THỐNG KÊ CHI PHÍ TAB =================
 stats_tab.columnconfigure(0, weight=1)
@@ -2980,12 +2763,33 @@ def open_regenerate_dialog():
 
 # ================= QUICK TRANSLATE TAB (CLIPBOARD) =================
 quick_status_var = tk.StringVar(value="Sẵn sàng paste text từ clipboard")
+quick_model_var = tk.StringVar(value=MODELS[0])
 
 quick_input_toolbar = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
 quick_input_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
 quick_input_toolbar.columnconfigure(1, weight=1)
 
 tk.Label(quick_input_toolbar, text="📋 Paste từ Clipboard:", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+quick_model_frame = tk.Frame(quick_input_toolbar, bg=PALETTE["panel"])
+quick_model_frame.grid(row=0, column=1, sticky="w", padx=(15, 8))
+
+tk.Label(
+	quick_model_frame,
+	text="Model dịch nhanh:",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold")
+).pack(side="left", padx=(0, 6))
+
+quick_model_cb = ttk.Combobox(
+	quick_model_frame,
+	values=MODELS,
+	textvariable=quick_model_var,
+	state="readonly",
+	width=30
+)
+quick_model_cb.pack(side="left")
 
 tk.Button(
 	quick_input_toolbar, text="📥 Paste from Clipboard", font=("Segoe UI", 9, "bold"),
@@ -3126,71 +2930,7 @@ diff_info_text.insert(tk.END,
 diff_info_text.config(state="disabled")
 
 
-# ================= QUALITY CHECK TAB =================
-quality_toolbar = tk.Frame(quality_tab, bg=PALETTE["panel"])
-quality_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
-quality_toolbar.columnconfigure(1, weight=1)
 
-tk.Label(
-	quality_toolbar, text="✅ Kiểm tra chất lượng dịch tự động:",
-	bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")
-).grid(row=0, column=0, sticky="w", padx=8, pady=8)
-
-def refresh_quality_check():
-	quality_tree.delete(*quality_tree.get_children())
-	for result in quality_check_results:
-		status = "✅ OK"
-		if result["is_empty"]:
-			status = "🔴 Empty"
-		elif result["duplicate_sentences"]:
-			status = "⚠️ Duplicates"
-		elif result["is_too_short"]:
-			status = "⚠️ Too short"
-		elif result["length_ratio"] < 0.6:
-			status = "⚠️ Ratio"
-		
-		quality_tree.insert("", "end", values=(
-			result["index"] + 1,
-			status,
-			f"{result['length_ratio']:.1%}",
-			"✓" if not result["has_duplicates"] else "✗"
-		))
-
-tk.Button(
-	quality_toolbar, text="🔄 Làm mới", font=("Segoe UI", 9, "bold"),
-	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
-	command=refresh_quality_check
-).grid(row=0, column=2, padx=8, pady=8)
-
-quality_tree_frame = tk.Frame(quality_tab, bg=PALETTE["panel"])
-quality_tree_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
-
-quality_columns = ("Chunk", "Status", "Length Ratio", "No Dup")
-quality_tree = ttk.Treeview(
-	quality_tree_frame, columns=quality_columns, height=25,
-	style="Treeview"
-)
-quality_tree.heading("#0", text="ID")
-quality_tree.column("#0", width=50)
-
-for col in quality_columns:
-	quality_tree.heading(col, text=col)
-	quality_tree.column(col, width=120)
-
-scrollbar = ttk.Scrollbar(quality_tree_frame, orient="vertical", command=quality_tree.yview)
-quality_tree.configure(yscroll=scrollbar.set)
-quality_tree.pack(side="left", fill="both", expand=True)
-scrollbar.pack(side="right", fill="y")
-
-quality_info_frame = tk.Frame(quality_tab, bg=PALETTE["panel"])
-quality_info_frame.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 6))
-
-quality_info_text = tk.Label(
-	quality_info_frame, text="",
-	bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "italic"),
-	wraplength=600, justify="left"
-)
-quality_info_text.pack(anchor="w", padx=8, pady=8)
 
 
 input_path = tk.StringVar()
@@ -3243,135 +2983,7 @@ entry_opts = {
 	"highlightbackground": PALETTE["border"],
 }
 
-consistency_file_var = tk.StringVar()
-consistency_status_var = tk.StringVar(value="Sẵn sàng kiểm tra bản dịch output.")
 
-def sync_consistency_file_with_output(*args):
-	if not consistency_file_var.get().strip():
-		consistency_file_var.set(output_path.get().strip())
-
-output_path.trace_add("write", sync_consistency_file_with_output)
-
-consistency_toolbar = tk.Frame(consistency_tab, bg=PALETTE["panel"])
-consistency_toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 6), padx=6)
-consistency_toolbar.columnconfigure(1, weight=1)
-
-tk.Label(
-	consistency_toolbar,
-	text="File bản dịch output:",
-	bg=PALETTE["panel"],
-	fg=PALETTE["text_muted"],
-	font=("Segoe UI", 9, "bold"),
-).grid(row=0, column=0, sticky="w", padx=(8, 6), pady=8)
-
-consistency_file_entry = tk.Entry(consistency_toolbar, textvariable=consistency_file_var, **entry_opts)
-consistency_file_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=8)
-
-tk.Button(
-	consistency_toolbar,
-	text="Chọn file",
-	font=("Segoe UI", 9, "bold"),
-	bg=PALETTE["accent_alt"],
-	fg="#0b0f19",
-	bd=0,
-	padx=10,
-	pady=6,
-	command=lambda: consistency_file_var.set(
-		filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
-	),
-).grid(row=0, column=2, padx=(0, 6), pady=8)
-
-tk.Button(
-	consistency_toolbar,
-	text="Dùng output hiện tại",
-	font=("Segoe UI", 9, "bold"),
-	bg=PALETTE["ok"],
-	fg="#0b0f19",
-	bd=0,
-	padx=10,
-	pady=6,
-	command=lambda: consistency_file_var.set(output_path.get().strip()),
-).grid(row=0, column=3, padx=(0, 6), pady=8)
-
-consistency_run_btn = tk.Button(
-	consistency_toolbar,
-	text="🧭 Phân tích xưng hô",
-	font=("Segoe UI", 9, "bold"),
-	bg=PALETTE["accent"],
-	fg="#0b0f19",
-	bd=0,
-	padx=10,
-	pady=6,
-	command=run_consistency_check,
-)
-consistency_run_btn.grid(row=0, column=4, padx=(0, 8), pady=8)
-
-consistency_panels = tk.Frame(consistency_tab, bg=PALETTE["bg"])
-consistency_panels.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
-consistency_panels.columnconfigure(0, weight=1)
-consistency_panels.rowconfigure(1, weight=1)
-consistency_panels.rowconfigure(2, weight=1)
-
-consistency_hint_label = tk.Label(
-	consistency_panels,
-	textvariable=consistency_status_var,
-	bg=PALETTE["panel"],
-	fg=PALETTE["text_muted"],
-	font=("Segoe UI", 9, "italic"),
-	anchor="w",
-)
-consistency_hint_label.grid(row=0, column=0, sticky="ew", pady=(0, 6), padx=2)
-
-consistency_table_frame = tk.Frame(consistency_panels, bg=PALETTE["panel"])
-consistency_table_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 6))
-consistency_table_frame.columnconfigure(0, weight=1)
-consistency_table_frame.rowconfigure(0, weight=1)
-
-consistency_columns = ("severity", "chunks", "issue_type", "explanation", "suggestion")
-consistency_table = ttk.Treeview(
-	consistency_table_frame,
-	columns=consistency_columns,
-	show="headings",
-	style="History.Treeview",
-)
-consistency_table.grid(row=0, column=0, sticky="nsew")
-
-consistency_scroll_y = ttk.Scrollbar(consistency_table_frame, orient="vertical", command=consistency_table.yview)
-consistency_scroll_y.grid(row=0, column=1, sticky="ns")
-consistency_scroll_x = ttk.Scrollbar(consistency_table_frame, orient="horizontal", command=consistency_table.xview)
-consistency_scroll_x.grid(row=1, column=0, sticky="ew")
-consistency_table.configure(yscrollcommand=consistency_scroll_y.set, xscrollcommand=consistency_scroll_x.set)
-
-consistency_table.heading("severity", text="Mức độ")
-consistency_table.heading("chunks", text="Chunk lệch")
-consistency_table.heading("issue_type", text="Loại")
-consistency_table.heading("explanation", text="Mô tả")
-consistency_table.heading("suggestion", text="Gợi ý")
-
-consistency_table.column("severity", width=90, anchor="center")
-consistency_table.column("chunks", width=120, anchor="center")
-consistency_table.column("issue_type", width=120, anchor="center")
-consistency_table.column("explanation", width=420, anchor="w")
-consistency_table.column("suggestion", width=420, anchor="w")
-consistency_table.tag_configure("odd", background=PALETTE["input_bg"])
-consistency_table.tag_configure("even", background=PALETTE["panel"])
-
-consistency_raw_frame = tk.Frame(consistency_panels, bg=PALETTE["panel"])
-consistency_raw_frame.grid(row=2, column=0, sticky="nsew")
-
-consistency_raw_text = scrolledtext.ScrolledText(
-	consistency_raw_frame,
-	height=9,
-	state="disabled",
-	bg=PALETTE["input_bg"],
-	fg=PALETTE["text"],
-	insertbackground=PALETTE["accent"],
-	wrap="word",
-	relief="flat",
-	highlightthickness=1,
-	highlightbackground=PALETTE["border"],
-)
-consistency_raw_text.pack(fill="both", expand=True, padx=5, pady=5)
 
 card_api = build_card(translate_tab, "🔐 Gemini API Key", 0, 1, colspan=2)
 tk.Label(

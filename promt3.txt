@@ -1,29 +1,88 @@
-Hãy đóng vai một Đại Dịch Giả, một Biên Tập Viên Văn Học cấp cao và một Học Giả am hiểu sâu sắc về ngôn ngữ, văn hóa, lịch sử Trung Hoa cũng như tinh hoa ngữ pháp, văn phong của tiếng Việt. Ngôn ngữ đầu ra bắt buộc là tiếng Việt chuẩn.
-MỤC TIÊU CỦA BẠN:
-Tôi sẽ cung cấp cho bạn một đoạn văn bản truyện chữ Trung Quốc được dịch thô (bản convert/Vietphrase). Nhiệm vụ của bạn là biên tập, chuyển ngữ và tái tạo lại đoạn văn bản đó thành một bản dịch hoàn hảo, mượt mà, thuần Việt, mang đậm tính văn học, đồng thời phải có hệ thống chú thích trực tiếp ngay trong câu cho các từ ngữ khó.
-BẠN PHẢI TUÂN THỦ NGHIÊM NGẶT CÁC QUY TẮC CHI TIẾT SAU ĐÂY:
-1. HỆ THỐNG CHÚ THÍCH TRỰC TIẾP (YÊU CẦU QUAN TRỌNG NHẤT):
-Trong quá trình dịch, tuyệt đối không được bỏ qua các từ Hán Việt mang sắc thái văn chương, thành ngữ (4 chữ), tục ngữ, điển tích, điển cố, các câu thơ, hoặc các thuật ngữ đặc thù (tu tiên, cổ đại, phong thủy, y lý, v.v.).
-Nếu việc dịch thuần Việt làm mất đi sự trang trọng hoặc lớp nghĩa sâu xa của từ, hãy giữ nguyên từ Hán Việt đó, và MỞ NGOẶC ĐƠN () ngay bên cạnh để giải thích ngắn gọn, súc tích nhưng đầy đủ ý nghĩa.
-Cấu trúc chú thích: Từ Hán Việt + (giải nghĩa âm Hán Việt [nếu cần] + ý nghĩa trong ngữ cảnh).
-Ví dụ về thành ngữ: "Bọn họ vốn là thanh mai trúc mã, hai nhỏ vô tư, nay lại đi đến bước đường kiến huyết phong hầu (thấy máu là chết, ý chỉ sự tàn độc, chí mạng), thật khiến người ta thổn thức."
-Ví dụ về từ khó/cổ đại: "Nàng khẽ nâng nhu oản (cổ tay mềm mại), rót một chén hương minh (trà ngon có hương thơm)."
-Ví dụ về thơ ca: Nếu có thơ, hãy cố gắng dịch thơ hoặc giữ âm Hán Việt và chú thích: "Hắn ngâm nga: Nhân sinh nhược chỉ như sơ kiến (Nếu con người ta mãi giữ được cảm xúc như thuở ban đầu mới gặp), ánh mắt lộ vẻ xa xăm."
-2. TỐI ƯU HÓA VĂN PHONG VÀ NGỮ PHÁP THUẦN VIỆT:
-Phá vỡ hoàn toàn cấu trúc câu cứng nhắc của tiếng Trung (bản convert). Tiếng Trung thường dùng câu dài, nhiều dấu phẩy, cấu trúc "đích/của" lặp lại. Hãy mạnh dạn ngắt câu, đảo ngữ, thêm bớt hư từ (thì, là, mà, ở, bị, được) sao cho câu văn tiếng Việt trôi chảy, logic và đúng nhịp điệu.
-Loại bỏ triệt để các rác Vietphrase như: "hảo hảo" (hãy dịch là: đàng hoàng, tử tế, cẩn thận), "chích là" (chỉ là), "đi ra ngoài" (khi miêu tả hành động văng ra xa -> dịch là: văng ra, dội ngược lại), "nhất cái" (một cái/một tên/một người), "sở hữu" (tất cả/toàn bộ).
-Không lạm dụng từ "của". Ví dụ: thay vì "kiếm của hắn", hãy dùng "kiếm trong tay hắn" hoặc "thanh kiếm hắn mang".
-3. ĐẠI TỪ NHÂN XƯNG VÀ XƯNG HÔ:
-Phân tích kỹ ngữ cảnh để chọn đại từ nhân xưng phù hợp tuyệt đối với văn hóa truyện (Tiên hiệp, Kiếm hiệp, Cổ đại, Ngôn tình hay Đô thị).
-Nam chính/Nam phụ: Hắn, y, gã, chàng, nam nhân kia...
-Nữ chính/Nữ phụ: Nàng, thị, cô ta, thiếu nữ, nữ tử kia...
-Ngôi thứ nhất và thứ hai: Ta - ngươi, tại hạ - các hạ, lão phu - tiểu bối, vi sư - đồ nhi, trẫm - thần, huynh - muội, bệ hạ - nương nương... (Tùy thuộc vào quan hệ thứ bậc, thái độ thù địch hay thân thiết trong đoạn văn).
-Đảm bảo tính nhất quán của nhân xưng từ đầu đến cuối đoạn.
-4. BỐI CẢNH VÀ CẢM XÚC (SHOW, DON'T TELL):
-Cảnh chiến đấu/Hành động: Sử dụng động từ mạnh, dứt khoát. Nhịp câu ngắn, nhanh, dồn dập. Thể hiện rõ uy lực của chiêu thức.
-Cảnh tình cảm/Nội tâm: Sử dụng tính từ miêu tả sâu sắc, câu văn giàu hình ảnh, nhịp điệu chậm rãi, mang tính gợi hình, gợi cảm cao.
-Cảnh miêu tả phong cảnh/Nhân vật: Sử dụng từ láy tiếng Việt một cách tinh tế (mơ màng, lấp lánh, thướt tha, lạnh lẽo, âm u...) để tăng tính biểu cảm.
-5. ĐỊNH DẠNG ĐẦU RA (OUTPUT STRICT RULES):
-CHỈ IN RA BẢN DỊCH HOÀN CHỈNH.
-KHÔNG tự động thêm bất kỳ lời chào hỏi, lời bình luận, tóm tắt, hay câu xác nhận nào ở đầu hoặc cuối văn bản (Ví dụ: Không được viết "Dưới đây là bản dịch...", "Tôi đã hoàn thành...", "Bản dịch này...").
-Giữ nguyên các định dạng phân đoạn, ngắt dòng của bản gốc.
+Truyện được đăng tại https://sangtacviet.com/truyen/qidian/1/1048940874/907979439/
+
+Lần này gặp bơi lượng tin tức cực lớn.
+Vị kia từ trước đến nay trầm tĩnh thong dong, không nói cười tuỳ tiện đại thiên địa tu sĩ, ở toà này Huyền Không sơn nhìn lên lấy cô gái mặc áo xanh kia lúc, hiển nhiên giống như là một cái yêu mà không thể si tình nhân vật.
+Bất quá, nữ tử kia đến tột cùng là ai? Lâm Túc ngày vì sao muốn dùng ánh mắt như vậy nhìn nàng? Còn có bên người nàng cái kia từ trong biển mây đi ra nam tử, thì là người nào? Là Lâm Túc ngày tình địch?
+Những nghi vấn này ở trong đầu hắn xoay mấy hơi, liền bị hắn tạm thời ép xuống.
+So với Lâm Túc ngày nhi nữ tình trường, dưới mắt có càng đáng giá hắn để ý đồ vật.
+【 Tiên xác 】.
+“Tịch gia không biết tiên xác cơ duyên...... Lâm Túc ngày cũng không phải là đơn thuần đến đây Tầm Chân vấn đỉnh.”
+“Có thể để cho một tôn có Kim Khuyết cơ hội học cung đệ tử cam mạo phong hiểm lớn như vậy, cái này tiên xác giá trị, chỉ sợ so với động thiên bên trong đỉnh khí cũng không kém bao nhiêu.”
+“Bất quá...... Đỉnh khí 【 Định thiên bút 】 muốn vì Lâm Túc nhật trọng định 【 Vạn pháp đồng tu 】 con đường......”
+“Đỉnh khí thực sự huyền diệu.”
+Trần Linh Tẩy nghĩ tới đây, bỗng nhiên lại nhớ lại hồng y nữ tử kia nói qua một câu nói khác.
+Hắn thu hồi suy nghĩ, liền nghĩ tới một chuyện khác.
+Lâm Túc mấy ngày trước tới đây động thiên, bất quá hai năm thời gian.
+Hắn thô sơ giản lược đoán chừng một phen.
+Chính là tăng thêm từ Tịch Mộ nơi đó có được ba cái linh thạch, lại thêm cầu cơ sơn động trong huyệt toà kia rõ ràng diệu trụ cột khí chi trận trận pháp đem trợ, mình muốn tu hành đến đi khí lầu năm, thấp nhất cũng còn cần nửa năm thời gian.
+Đi khí lầu sáu, xa xa khó vời.
+Mà Lâm Túc ngày chuyển thế bất quá hai năm, liền đã bước vào cấp độ này.
+“Xem ra cái này Lâm Túc ngày, luận đến thiên tư, có khả năng không giống như Tịch Ngọc yếu.” Trần Linh Tẩy ở trong lòng thầm nghĩ.
+Chính là Thái tử Doanh Trì viên kia 【 Linh Khí bảo châu 】, vốn là Cừu Ly Hổ tại trong đấu thú hành cung tế tự đỉnh khí sở dụng, bị hắn phải đến.
+Lúc này ẩn chứa trong đó linh khí, đang nhanh chóng tiêu hao, trong nháy mắt liền triệt để hầu như không còn.
+Ánh sáng nhạt dập tắt.
+Trần Linh Tẩy chân mày hơi nhíu lại.
+Hắn đang ngờ tới, bỗng nhiên hình như có cảm giác, nhìn về phía cửa phòng.
+Đúng vào lúc này, cửa khách sạn bỗng nhiên bị gõ.
+Cái kia tiếng đập cửa không vội không chậm, có chút quy củ.
+Trần Linh Tẩy tâm niệm cấp chuyển.
+Hắn hơi suy nghĩ một chút, trên mặt bất động thanh sắc, chỉ ngẩng đầu lên, hướng cái kia phiến đóng chặt cánh cửa liếc mắt nhìn, nhẹ nói hai chữ.
+“Đi vào.”
+Cửa bị đẩy ra, đứng ở cửa một người.
+Đó là một cái lão thái giám.
+Hắn nhìn ước chừng sáu bảy chục tuổi, mái đầu bạc trắng chải cẩn thận tỉ mỉ, da mặt trắng nõn không cần, thân mang một bộ áo mãng bào màu xanh lam sẫm, trong tay cầm một cái phất trần.
+Lão thái giám đứng tại cánh cửa cạnh ngoài, cũng không đi vào, chỉ ngẩng đầu lên, cặp kia hơi có vẻ con mắt đục ngầu rơi vào trên thân Trần Linh Tẩy, liền hơi hơi khom người, hướng Trần Linh Tẩy thi lễ một cái.
+“Chúng ta phụng Thái tử chi mệnh, đến đây thỉnh các hạ.” Lão thái giám âm thanh lanh lảnh cũng không the thé, ngữ điệu không vội không chậm: “Thái tử điện hạ đi giá Mang Dương Sơn, còn xin các hạ lên núi một lần.”
+Hắn dừng một chút, đứng lên, cặp kia con mắt đục ngầu bên trong nhìn không ra tâm tình gì, chỉ cửa trước bên ngoài hư hư đưa ra, nói: “Chúng ta đã chuẩn bị xong xe ngựa, làm phiền các hạ khởi hành.”
+Nói xong, hắn vẫn còn so sánh một cái dấu tay xin mời.
+Trần Linh Tẩy bàn đầu gối ngồi ở trên giường, không nhúc nhích tí nào.
+Ánh mắt của hắn rơi vào cái kia lão thái giám trên thân, thần sắc không thay đổi.
+Cái này lão thái giám nhìn tuổi già sức yếu, tựa như một trận gió liền có thể thổi ngã.
+Tựa như một đầu ẩn núp cự mãng, chiếm cứ ở trong cơ thể hắn chỗ sâu, chỉ lộ ra một chút khó mà phát giác manh mối.
+Triệu Kình Lâu Kim Thân đại thành, tím mài Kim Luân không thể phá vỡ.
+Huyền cùng trong quan cái kia phòng thủ phiên lão bộc, một chưởng chi uy lệnh triệt để cảm giác bên trong hắn suýt nữa mất mạng.
+Có thể cùng trước mắt cái này lão thái giám so sánh, những người kia tựa như đom đóm với hạo nguyệt.
+“Người này...... Cửu chuyển tu vi!”
+Trần Linh Tẩy không khỏi kinh ngạc.
+Đây là hắn trên thế giới này, thấy qua người mạnh nhất, chỉ dựa vào khí huyết tu vi, chiến lực chỉ sợ xa xa mạnh hơn không chết Liễu Khôi!
+Hắn vẻn vẹn đứng ở nơi đó, tựa như một tòa vực sâu.
+Trần Linh Tẩy tâm bên trong lướt qua một hơi khí lạnh, trên mặt lại bất động thanh sắc.
+Nơi đó, Tịch Mộ đang vô thanh vô tức lơ lửng giữa trời, quanh thân bị Trần Linh Tẩy giấu đi mũi nhọn pháp che lấp, tựa như một mảnh tan vào bóng tối sương mù.
+Chỉ cần Trần Linh Tẩy tâm niệm khẽ động, cỗ này không chết Liễu Khôi liền sẽ ầm vang bộc phát, lấy đi khí lầu sáu tu vi, hướng cái kia lão thái giám khởi xướng Lôi Đình nhất kích.
+Trên người hắn còn vẫn có vài trương át chủ bài.
+Không chết cành liễu...... Còn có đạo phong ấn kia Tịch Ngọc một chưởng chi uy Huyết phù.
+Bằng vào ta bây giờ tu vi, chính là át chủ bài ra hết, lại có Tịch Mộ khôi lỗi tương trợ, chỉ sợ cũng không cách nào mạng sống.”
+Trần Linh Tẩy tâm đầu nhanh quay ngược trở lại.
+Thái tử Doanh Trì phái người tới mời hắn, tất nhiên là bởi vì mây cùng quận chúa, Sở Lâm Tử , Dương Trục Nhật cái chết.
+Ba người này đều là Thái tử thành viên tổ chức người mang Thái tử nuốt khí chi pháp, lấy người vì thuốc.
+Bây giờ 3 người liên tiếp chết ở trong tay chấp linh tướng quân, chuyện bên trong lại liên lụy Lâm Lung Nguyệt...... Xem ra Thái tử đã là đang hoài nghi hắn cái này cao nhân tiền bối.?
+Trần Linh Tẩy tâm bên trong ý niệm kết thúc, như cũ ngồi ở trên giường, bất động như núi.
+Lưng của hắn thẳng tắp như tùng, hai tay đặt tại trên gối, hô hấp đều đặn, sắc mặt như thường.
+Tiếp đó, hắn khẽ gật đầu một cái.
+“Ngươi lại đi nói cho Doanh Trì.” Hắn mở miệng, thanh âm không lớn, ngữ điệu bình thản, tựa như tại phân phó một kiện lại tầm thường bất quá việc nhỏ: “Sau ba tháng, để cho hắn đến đây thếp vàng núi gặp ta.”
+Không những kháng mệnh, còn hô to Thái tử tục danh.
+Lão thái giám khẽ lắc đầu.
+Nhưng chính là cái này nhỏ xíu một tia khí huyết, lại làm cho Trần Linh Tẩy con ngươi chợt hơi co lại.
+“Cái này lão thái giám...... Khí huyết mạnh, làm cho người không thể tưởng tượng.”
+“Thật chẳng lẽ chính là cửu chuyển võ tu?”
+Cái gọi là cửu chuyển, chính là ngọc khí viên mãn sau đó, đem quanh thân ngọc chất khí huyết nhiều lần ngưng luyện, áp súc, thuế biến, mỗi hoàn thành nhất chuyển, khí huyết liền tinh thuần mấy lần.
+Đợi cho cửu chuyển công thành, một thân khí huyết tựa như cửu luyện tinh kim, không thể phá vỡ, duệ không thể đỡ.
+Tới lúc đó, khoảng cách võ đạo cực hạn vào huyền cảnh giới, liền chỉ kém một chân bước vào cửa.
+Nhân vật như vậy, chính là đặt ở hoàng cung đại nội, cũng là phải tính đến cường giả.
+Nhưng Trần Linh Tẩy khuôn mặt bên trên lại vẫn không có chút biểu tình nào.
+Hắn thậm chí không có nhìn cái kia lão thái giám trên thân lưu chuyển khí huyết sợi tơ, chỉ là ngồi ở trên giường, khẽ nâng đầu lên, nhìn phía lão thái giám đôi mắt.
+Ánh mắt kia đạm nhiên, thâm thúy, nhìn không ra mảy may kinh hoàng.
+Đúng lúc này, Trần Linh Tẩy một tia Linh Khí trao đổi thiếp thân mà phóng viên kia phù lục.
+Chính là Trần Linh Tẩy để mà xem như bảo mệnh lá bài tẩy 【 Tịch Ngọc phù lục 】!
+Lúc này, một tia Linh Khí câu thông phù lục.
+Tiếp đó, một tia khí tức kinh người từ trên thân Trần Linh Tẩy tỏa ra.
+Chỉ là cái này tiết lộ một tia, lại xen lẫn kinh thiên động địa uy năng đáng sợ!
+Tựa như cùng thiên tai vòi rồng, kinh khủng vô dáng!
+Lão thái giám sắc mặt cuối cùng thay đổi.
+Hắn mắt lão không khỏi nhìn về phía tại trên giường ngồi yên người trẻ tuổi, người trẻ tuổi thần sắc lạnh lùng nhìn chăm chú lên hắn, khí thế mạnh mẽ từ trên người hắn nở rộ ra, để cho lão thái giám trong lúc nhất thời tựa như nhìn thấy một vị tiên nhân!
+Con ngươi của hắn hơi hơi co rút, cặp kia con mắt đục ngầu bên trong lần thứ nhất chân chính lộ ra vẻ mặt ngưng trọng
+Trần Linh Tẩy vẫn ngồi ở trên giường, không nhúc nhích.
+Qua ước chừng mười mấy hơi thở thời gian, hắn mới chậm rãi thở ra một cái.
+“Ta cái này cây mơ, thực sự là giúp ta đại ân.” Trần Linh Tẩy Linh Khí cảm ứng bị hắn thiếp thân để phù lục.
+Cảm khái sau đó, hắn đứng dậy: “Xem ra Thái tử là mượn cái kia Linh Khí trong bảo châu chính mình Linh Khí thăm dò đến phương vị của ta.
+Bây giờ trong bảo châu Thái tử Linh Khí đã hết, không cách nào lại đi định vị tại ta, ta nhưng cũng không thể đợi ở chỗ này.”
