@@ -213,6 +213,7 @@ def load_settings():
 		"input_file": "",
 		"output_file": "",
 		"model": MODELS[0],
+		"quick_model": MODELS[0],
 		"thinking_level": "medium",
 		"model_fallback_order": "|".join(MODELS),
 		"threads": "3",
@@ -253,6 +254,7 @@ def save_settings():
 		"input_file": input_path.get(),
 		"output_file": output_path.get(),
 		"model": model_var.get(),
+		"quick_model": quick_model_var.get(),
 		"thinking_level": thinking_level_var.get(),
 		"model_fallback_order": model_fallback_order_var.get(),
 		"threads": thread_var.get(),
@@ -284,6 +286,7 @@ def apply_settings(settings):
 	input_path.set(settings.get("input_file", ""))
 	output_path.set(settings.get("output_file", ""))
 	model_var.set(settings.get("model", MODELS[0]))
+	quick_model_var.set(settings.get("quick_model", MODELS[0]))
 	thinking_level_var.set(settings.get("thinking_level", "medium"))
 	model_fallback_order_var.set(settings.get("model_fallback_order", "|".join(MODELS)))
 	thread_var.set(settings.get("threads", "3"))
@@ -2298,7 +2301,7 @@ def translate_clipboard_text():
 	
 	def _worker():
 		try:
-			model_id = model_var.get()
+			model_id = quick_model_var.get()
 			temperature = float(temp_var.get())
 			max_tokens = int(max_output_tokens_var.get())
 			prompt = prompt_text.get("1.0", tk.END).strip()
@@ -2980,12 +2983,33 @@ def open_regenerate_dialog():
 
 # ================= QUICK TRANSLATE TAB (CLIPBOARD) =================
 quick_status_var = tk.StringVar(value="Sẵn sàng paste text từ clipboard")
+quick_model_var = tk.StringVar(value=MODELS[0])
 
 quick_input_toolbar = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
 quick_input_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
 quick_input_toolbar.columnconfigure(1, weight=1)
 
 tk.Label(quick_input_toolbar, text="📋 Paste từ Clipboard:", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+quick_model_frame = tk.Frame(quick_input_toolbar, bg=PALETTE["panel"])
+quick_model_frame.grid(row=0, column=1, sticky="w", padx=(15, 8))
+
+tk.Label(
+	quick_model_frame,
+	text="Model dịch nhanh:",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold")
+).pack(side="left", padx=(0, 6))
+
+quick_model_cb = ttk.Combobox(
+	quick_model_frame,
+	values=MODELS,
+	textvariable=quick_model_var,
+	state="readonly",
+	width=30
+)
+quick_model_cb.pack(side="left")
 
 tk.Button(
 	quick_input_toolbar, text="📥 Paste from Clipboard", font=("Segoe UI", 9, "bold"),
