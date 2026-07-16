@@ -102,6 +102,8 @@ MODEL_PRICING = {
 	"gemini-3-flash-preview": {"input_per_1m": 0.50, "output_per_1m": 3.00},
 	"gemini-2.5-flash": {"input_per_1m": 0.30, "output_per_1m": 2.50},
 	"gemini-2.5-flash-lite": {"input_per_1m": 0.10, "output_per_1m": 0.40},
+	"gemma-4-26b-a4b-it": {"input_per_1m": 0.15, "output_per_1m": 0.40},
+	"gemma-4-31b-it": {"input_per_1m": 0.15, "output_per_1m": 0.40},
 }
 
 USD_TO_VND = 27000
@@ -543,20 +545,37 @@ def build_prompt_with_glossary(base_prompt, glossary_entries):
 	return f"{base_prompt}\n{glossary_instruction}"
 
 
+checkpoint_lock = threading.Lock()
+
+
+def read_file_content_safely(file_path):
+	encodings = ["utf-8", "utf-8-sig", "utf-16", "cp1258", "cp1252", "latin-1"]
+	for enc in encodings:
+		try:
+			with open(file_path, "r", encoding=enc) as f:
+				return f.read()
+		except UnicodeDecodeError:
+			continue
+	# Fallback to utf-8 with errors='replace' to never fail
+	with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+		return f.read()
+
+
 def save_checkpoint(cp_file, index, text):
-	try:
-		if os.path.exists(cp_file):
-			with open(cp_file, "r", encoding="utf-8") as f:
-				data = json.load(f)
-		else:
-			data = {}
+	with checkpoint_lock:
+		try:
+			if os.path.exists(cp_file):
+				with open(cp_file, "r", encoding="utf-8") as f:
+					data = json.load(f)
+			else:
+				data = {}
 
-		data[str(index)] = text
+			data[str(index)] = text
 
-		with open(cp_file, "w", encoding="utf-8") as f:
-			json.dump(data, f, ensure_ascii=False, indent=2)
-	except Exception as e:
-		print(f"Lỗi khi lưu checkpoint: {e}")
+			with open(cp_file, "w", encoding="utf-8") as f:
+				json.dump(data, f, ensure_ascii=False, indent=2)
+		except Exception as e:
+			print(f"Lỗi khi lưu checkpoint: {e}")
 
 
 def format_time(seconds):
@@ -1197,7 +1216,18 @@ def split_text(text, size=CHUNK_SIZE, split_mode="keyword"):
 								if len(temp_str2) + len(s_text) > size:
 									if temp_str2.strip():
 										chunks.append(temp_str2)
-									temp_str2 = s_text
+										temp_str2 = ""
+									
+									if len(s_text) > size:
+										# Split s_text into pieces of size
+										for k in range(0, len(s_text), size):
+											sub_s = s_text[k:k+size]
+											if len(sub_s) < size or k + size >= len(s_text):
+												temp_str2 = sub_s
+											else:
+												chunks.append(sub_s)
+									else:
+										temp_str2 = s_text
 								else:
 									temp_str2 += s_text
 							temp_str = temp_str2
@@ -1331,10 +1361,13 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 			usage_data = {
 				"prompt_token_count": getattr(usage, "prompt_token_count", None),
 				"candidates_token_count": getattr(usage, "candidates_token_count", None),
+				"thoughts_token_count": getattr(usage, "thoughts_token_count", None),
 			}
 
-		input_tokens = _usage_get(usage_data, ["prompt_token_count"])
-		output_tokens = _usage_get(usage_data, ["candidates_token_count"])
+		input_tokens = _usage_get(usage_data, ["prompt_token_count", "promptTokenCount"])
+		candidates_tokens = _usage_get(usage_data, ["candidates_token_count", "candidatesTokenCount", "response_token_count", "responseTokenCount"])
+		thoughts_tokens = _usage_get(usage_data, ["thoughts_token_count", "thoughtsTokenCount"])
+		output_tokens = candidates_tokens + thoughts_tokens
 
 		response_text = ""
 		try:
@@ -1651,8 +1684,7 @@ def scan_story():
 		try:
 			add_log(f"🔍 Đang quét thuật ngữ (tối đa {scan_char_limit:,} ký tự, có thể mất 10-60 giây)...")
 			
-			with open(in_file, "r", encoding="utf-8") as f:
-				full_text = f.read()
+			full_text = read_file_content_safely(in_file)
 
 			limited_text = full_text[:scan_char_limit]
 			scan_segments = build_scan_segments(limited_text, segment_size=12000, max_segments=12)
@@ -1814,17 +1846,24 @@ def process_translation_logic():
 		if glossary_entries:
 			add_log(f"📚 Áp dụng glossary: {len(glossary_entries)} mục thuật ngữ.")
 
-		with open(in_file, "r", encoding="utf-8") as f:
-			chunks = split_text(f.read(), size=chunk_size, split_mode=chunk_split_mode_var.get())
+		chunks = split_text(read_file_content_safely(in_file), size=chunk_size, split_mode=chunk_split_mode_var.get())
 
 		total = len(chunks)
 		stats["total_chunks"] = total
 		results = [None] * total
 
-		if os.path.exists(cp_file):
-			with open(cp_file, "r", encoding="utf-8") as f:
-				saved_data = json.load(f)
+		has_checkpoint = False
+		saved_data = {}
+		with checkpoint_lock:
+			if os.path.exists(cp_file):
+				try:
+					with open(cp_file, "r", encoding="utf-8") as f:
+						saved_data = json.load(f)
+					has_checkpoint = True
+				except Exception as e:
+					add_log(f"⚠️ Không thể đọc file checkpoint (file lỗi hoặc rỗng): {e}")
 
+		if has_checkpoint and saved_data:
 			if messagebox.askyesno(
 				"Khôi phục",
 				f"Tìm thấy bản dịch dở dang ({len(saved_data)}/{total} đoạn). Dịch tiếp chứ?",
@@ -1836,8 +1875,9 @@ def process_translation_logic():
 				stats["chunks_done"] = len([r for r in results if r is not None])
 				add_log(f"🔄 Đã khôi phục {stats['chunks_done']} đoạn từ file checkpoint.")
 		else:
-			with open(cp_file, "w", encoding="utf-8") as f:
-				json.dump({}, f)
+			with checkpoint_lock:
+				with open(cp_file, "w", encoding="utf-8") as f:
+					json.dump({}, f)
 
 		progress_bar["maximum"] = total
 		pending_indices = [i for i in range(total) if results[i] is None]
@@ -1885,7 +1925,14 @@ def process_translation_logic():
 			return
 
 		with open(out_file, "w", encoding="utf-8") as f:
-			f.write("\n\n".join([r for r in results if r is not None]))
+			final_text = []
+			for idx, r in enumerate(results):
+				if r is not None:
+					final_text.append(r)
+				else:
+					fallback_warning = f"\n\n--- [LỖI DỊCH ĐOẠN {idx + 1} - DÙNG BẢN GỐC] ---\n{chunks[idx]}\n-----------------------------------------\n\n"
+					final_text.append(fallback_warning)
+			f.write("\n\n".join(final_text))
 
 		if drive_upload_var.get():
 			try:
@@ -2524,8 +2571,7 @@ def load_and_preview_chunks():
 		size_limit = CHUNK_SIZE
 		
 	try:
-		with open(input_file, "r", encoding="utf-8") as f:
-			text = f.read()
+		text = read_file_content_safely(input_file)
 		previewed_chunks = split_text(text, size_limit, split_mode=chunk_split_mode_var.get())
 		
 		chunk_listbox.delete(0, tk.END)
@@ -2536,14 +2582,15 @@ def load_and_preview_chunks():
 		
 		# Load translated chunks if exist
 		cp_file = get_checkpoint_path(input_file)
-		if os.path.exists(cp_file):
-			try:
-				with open(cp_file, "r", encoding="utf-8") as f:
-					saved_data = json.load(f)
-					for k, v in saved_data.items():
-						translated_preview_chunks[int(k)] = v
-			except Exception as e:
-				pass
+		with checkpoint_lock:
+			if os.path.exists(cp_file):
+				try:
+					with open(cp_file, "r", encoding="utf-8") as f:
+						saved_data = json.load(f)
+						for k, v in saved_data.items():
+							translated_preview_chunks[int(k)] = v
+				except Exception as e:
+					pass
 
 		preview_info_var.set(f"Tổng số chunk: {len(previewed_chunks)}")
 		chunk_content_text.config(state="normal")
@@ -2738,17 +2785,18 @@ def open_regenerate_dialog():
 		translated_preview_chunks[index] = new_trans
 		
 		cp_file = get_checkpoint_path(input_path.get())
-		saved_data = {}
-		if os.path.exists(cp_file):
-			try:
-				with open(cp_file, "r", encoding="utf-8") as f:
-					saved_data = json.load(f)
-			except:
-				pass
-			
-		saved_data[str(index)] = new_trans
-		with open(cp_file, "w", encoding="utf-8") as f:
-			json.dump(saved_data, f, ensure_ascii=False, indent=2)
+		with checkpoint_lock:
+			saved_data = {}
+			if os.path.exists(cp_file):
+				try:
+					with open(cp_file, "r", encoding="utf-8") as f:
+						saved_data = json.load(f)
+				except:
+					pass
+				
+			saved_data[str(index)] = new_trans
+			with open(cp_file, "w", encoding="utf-8") as f:
+				json.dump(saved_data, f, ensure_ascii=False, indent=2)
 			
 		on_chunk_select(None)
 		dialog.destroy()
@@ -2873,10 +2921,8 @@ def open_diff_viewer():
 		return
 	
 	try:
-		with open(input_file, "r", encoding="utf-8") as f:
-			original = f.read()
-		with open(output_file, "r", encoding="utf-8") as f:
-			translated = f.read()
+		original = read_file_content_safely(input_file)
+		translated = read_file_content_safely(output_file)
 		
 		show_diff_window(original, translated, input_file, output_file)
 	except Exception as e:
