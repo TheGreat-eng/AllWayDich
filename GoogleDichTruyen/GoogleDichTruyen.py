@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, scrolledtext
+from tkinter import filedialog, messagebox, ttk, scrolledtext, simpledialog
 import os
 import concurrent.futures
 import time
@@ -208,6 +208,11 @@ def decrypt_api_key(encrypted_key: str) -> str:
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings.json")
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_history.json")
 
+api_keys_dict = {}
+prompts_dict = {}
+last_selected_key = "Mặc định"
+last_selected_prompt = "Mặc định"
+
 
 def load_settings():
 	default_settings = {
@@ -230,6 +235,10 @@ def load_settings():
 		"drive_upload_enabled": False,
 		"drive_credentials_path": "",
 		"drive_folder_id": "",
+		"api_keys": {},
+		"current_key_name": "Mặc định",
+		"prompts": {},
+		"current_prompt_name": "Mặc định"
 	}
 
 	try:
@@ -238,10 +247,33 @@ def load_settings():
 				saved_settings = json.load(f)
 				default_settings.update(saved_settings)
 
+				# Decrypt the old single API key
+				old_api_key = ""
 				if saved_settings.get("api_key_encrypted"):
-					default_settings["api_key"] = decrypt_api_key(saved_settings["api_key_encrypted"])
-				else:
-					default_settings["api_key"] = ""
+					old_api_key = decrypt_api_key(saved_settings["api_key_encrypted"])
+				
+				# Load api_keys dict
+				api_keys = saved_settings.get("api_keys", {})
+				decrypted_api_keys = {}
+				for k_name, k_enc in api_keys.items():
+					decrypted_api_keys[k_name] = decrypt_api_key(k_enc)
+				
+				# Put old key under "Mặc định" if it's not already there
+				if old_api_key and "Mặc định" not in decrypted_api_keys:
+					decrypted_api_keys["Mặc định"] = old_api_key
+				if "Mặc định" not in decrypted_api_keys:
+					decrypted_api_keys["Mặc định"] = ""
+					
+				default_settings["api_keys"] = decrypted_api_keys
+				
+				# Load prompts dict
+				prompts = saved_settings.get("prompts", {})
+				old_prompt = saved_settings.get("prompt", DEFAULT_PROMPT)
+				if old_prompt and "Mặc định" not in prompts:
+					prompts["Mặc định"] = old_prompt
+				if "Mặc định" not in prompts:
+					prompts["Mặc định"] = DEFAULT_PROMPT
+				default_settings["prompts"] = prompts
 	except Exception as e:
 		print(f"Không thể tải cài đặt: {e}")
 
@@ -249,10 +281,25 @@ def load_settings():
 
 
 def save_settings():
-	api_key = api_key_entry.get().strip()
+	# Update the current selected key and prompt in memory
+	curr_key = current_key_name_var.get()
+	if curr_key:
+		api_keys_dict[curr_key] = api_key_entry.get().strip()
+		
+	curr_prompt = current_prompt_name_var.get()
+	if curr_prompt:
+		prompts_dict[curr_prompt] = prompt_text.get("1.0", tk.END).strip()
+
+	# Encrypt the api_keys dictionary values for saving
+	encrypted_api_keys = {}
+	for k_name, k_val in api_keys_dict.items():
+		encrypted_api_keys[k_name] = encrypt_api_key(k_val)
+
+	active_key = api_key_entry.get().strip()
+	active_prompt = prompt_text.get("1.0", tk.END).strip()
 
 	settings = {
-		"api_key_encrypted": encrypt_api_key(api_key),
+		"api_key_encrypted": encrypt_api_key(active_key),
 		"input_file": input_path.get(),
 		"output_file": output_path.get(),
 		"model": model_var.get(),
@@ -266,11 +313,15 @@ def save_settings():
 		"scan_char_limit": scan_char_limit_var.get(),
 		"temperature": temp_var.get(),
 		"glossary": glossary_text.get("1.0", tk.END).strip(),
-		"prompt": prompt_text.get("1.0", tk.END).strip(),
+		"prompt": active_prompt,
 		"theme": current_theme,
 		"drive_upload_enabled": bool(drive_upload_var.get()),
 		"drive_credentials_path": drive_credentials_path_var.get().strip(),
 		"drive_folder_id": drive_folder_id_var.get().strip(),
+		"api_keys": encrypted_api_keys,
+		"current_key_name": curr_key,
+		"prompts": prompts_dict,
+		"current_prompt_name": curr_prompt
 	}
 
 	try:
@@ -282,9 +333,33 @@ def save_settings():
 
 
 def apply_settings(settings):
-	global current_theme
+	global current_theme, api_keys_dict, prompts_dict, last_selected_key, last_selected_prompt
 
-	api_key_entry.insert(0, settings.get("api_key", ""))
+	api_keys_dict = settings.get("api_keys", {"Mặc định": ""})
+	prompts_dict = settings.get("prompts", {"Mặc định": DEFAULT_PROMPT})
+
+	curr_key = settings.get("current_key_name", "Mặc định")
+	if curr_key not in api_keys_dict:
+		curr_key = list(api_keys_dict.keys())[0] if api_keys_dict else "Mặc định"
+	current_key_name_var.set(curr_key)
+	last_selected_key = curr_key
+
+	curr_prompt = settings.get("current_prompt_name", "Mặc định")
+	if curr_prompt not in prompts_dict:
+		curr_prompt = list(prompts_dict.keys())[0] if prompts_dict else "Mặc định"
+	current_prompt_name_var.set(curr_prompt)
+	last_selected_prompt = curr_prompt
+
+	# Update Comboboxes list of values
+	try:
+		api_key_cb.config(values=list(api_keys_dict.keys()))
+		prompt_cb.config(values=list(prompts_dict.keys()))
+	except NameError:
+		pass
+
+	api_key_entry.delete(0, tk.END)
+	api_key_entry.insert(0, api_keys_dict.get(curr_key, ""))
+
 	input_path.set(settings.get("input_file", ""))
 	output_path.set(settings.get("output_file", ""))
 	model_var.set(settings.get("model", MODELS[0]))
@@ -302,12 +377,198 @@ def apply_settings(settings):
 	glossary_text.insert(tk.END, settings.get("glossary", DEFAULT_GLOSSARY))
 
 	prompt_text.delete("1.0", tk.END)
-	prompt_text.insert(tk.END, settings.get("prompt", DEFAULT_PROMPT))
+	prompt_text.insert(tk.END, prompts_dict.get(curr_prompt, DEFAULT_PROMPT))
 
 	current_theme = settings.get("theme", "dark")
 	drive_upload_var.set(bool(settings.get("drive_upload_enabled", False)))
 	drive_credentials_path_var.set(settings.get("drive_credentials_path", ""))
 	drive_folder_id_var.set(settings.get("drive_folder_id", ""))
+
+
+# ================= QUẢN LÝ NHIỀU API KEY & PROMPT =================
+def on_api_key_select(event=None):
+	global last_selected_key
+	new_key_name = current_key_name_var.get()
+	if not new_key_name:
+		return
+	
+	if last_selected_key in api_keys_dict:
+		api_keys_dict[last_selected_key] = api_key_entry.get().strip()
+		
+	api_key_entry.delete(0, tk.END)
+	api_key_entry.insert(0, api_keys_dict.get(new_key_name, ""))
+	
+	last_selected_key = new_key_name
+
+
+def add_new_api_key():
+	global last_selected_key
+	new_name = simpledialog.askstring("Thêm API Key mới", "Nhập tên cho API Key mới:")
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name:
+		return
+	
+	if new_name in api_keys_dict:
+		messagebox.showerror("Lỗi", "Tên API Key đã tồn tại!")
+		return
+		
+	if last_selected_key in api_keys_dict:
+		api_keys_dict[last_selected_key] = api_key_entry.get().strip()
+		
+	api_keys_dict[new_name] = ""
+	
+	api_key_cb.config(values=list(api_keys_dict.keys()))
+	current_key_name_var.set(new_name)
+	last_selected_key = new_name
+	
+	api_key_entry.delete(0, tk.END)
+	api_key_entry.focus_set()
+	add_log(f"🔑 Đã thêm API Key mới: {new_name}")
+
+
+def rename_api_key():
+	curr_key = current_key_name_var.get()
+	if not curr_key:
+		return
+		
+	new_name = simpledialog.askstring("Đổi tên API Key", f"Nhập tên mới cho API Key '{curr_key}':", initialvalue=curr_key)
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name or new_name == curr_key:
+		return
+		
+	if new_name in api_keys_dict:
+		messagebox.showerror("Lỗi", "Tên API Key mới đã tồn tại!")
+		return
+		
+	api_keys_dict[new_name] = api_keys_dict.pop(curr_key, api_key_entry.get().strip())
+	
+	api_key_cb.config(values=list(api_keys_dict.keys()))
+	current_key_name_var.set(new_name)
+	global last_selected_key
+	last_selected_key = new_name
+	add_log(f"🔑 Đã đổi tên API Key '{curr_key}' thành '{new_name}'")
+
+
+def delete_api_key():
+	global last_selected_key
+	curr_key = current_key_name_var.get()
+	if not curr_key:
+		return
+	
+	if len(api_keys_dict) <= 1:
+		messagebox.showwarning("Cảnh báo", "Không thể xóa API Key cuối cùng!")
+		return
+		
+	if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa API Key '{curr_key}'?"):
+		api_keys_dict.pop(curr_key, None)
+		
+		remaining_keys = list(api_keys_dict.keys())
+		next_key = remaining_keys[0]
+		
+		api_key_cb.config(values=remaining_keys)
+		current_key_name_var.set(next_key)
+		last_selected_key = next_key
+		
+		api_key_entry.delete(0, tk.END)
+		api_key_entry.insert(0, api_keys_dict.get(next_key, ""))
+		add_log(f"🔑 Đã xóa API Key: {curr_key}")
+
+
+def on_prompt_select(event=None):
+	global last_selected_prompt
+	new_prompt_name = current_prompt_name_var.get()
+	if not new_prompt_name:
+		return
+		
+	if last_selected_prompt in prompts_dict:
+		prompts_dict[last_selected_prompt] = prompt_text.get("1.0", tk.END).strip()
+		
+	prompt_text.delete("1.0", tk.END)
+	prompt_text.insert(tk.END, prompts_dict.get(new_prompt_name, ""))
+	
+	last_selected_prompt = new_prompt_name
+
+
+def add_new_prompt():
+	global last_selected_prompt
+	new_name = simpledialog.askstring("Thêm Prompt mới", "Nhập tên cho Prompt mới:")
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name:
+		return
+		
+	if new_name in prompts_dict:
+		messagebox.showerror("Lỗi", "Tên Prompt đã tồn tại!")
+		return
+		
+	if last_selected_prompt in prompts_dict:
+		prompts_dict[last_selected_prompt] = prompt_text.get("1.0", tk.END).strip()
+		
+	prompts_dict[new_name] = DEFAULT_PROMPT
+	
+	prompt_cb.config(values=list(prompts_dict.keys()))
+	current_prompt_name_var.set(new_name)
+	last_selected_prompt = new_name
+	
+	prompt_text.delete("1.0", tk.END)
+	prompt_text.insert(tk.END, DEFAULT_PROMPT)
+	prompt_text.focus_set()
+	add_log(f"📝 Đã thêm Prompt mới: {new_name}")
+
+
+def rename_prompt():
+	curr_prompt = current_prompt_name_var.get()
+	if not curr_prompt:
+		return
+		
+	new_name = simpledialog.askstring("Đổi tên Prompt", f"Nhập tên mới cho Prompt '{curr_prompt}':", initialvalue=curr_prompt)
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name or new_name == curr_prompt:
+		return
+		
+	if new_name in prompts_dict:
+		messagebox.showerror("Lỗi", "Tên Prompt mới đã tồn tại!")
+		return
+		
+	prompts_dict[new_name] = prompts_dict.pop(curr_prompt, prompt_text.get("1.0", tk.END).strip())
+	
+	prompt_cb.config(values=list(prompts_dict.keys()))
+	current_prompt_name_var.set(new_name)
+	global last_selected_prompt
+	last_selected_prompt = new_name
+	add_log(f"📝 Đã đổi tên Prompt '{curr_prompt}' thành '{new_name}'")
+
+
+def delete_prompt():
+	global last_selected_prompt
+	curr_prompt = current_prompt_name_var.get()
+	if not curr_prompt:
+		return
+		
+	if len(prompts_dict) <= 1:
+		messagebox.showwarning("Cảnh báo", "Không thể xóa Prompt cuối cùng!")
+		return
+		
+	if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa Prompt '{curr_prompt}'?"):
+		prompts_dict.pop(curr_prompt, None)
+		
+		remaining_prompts = list(prompts_dict.keys())
+		next_prompt = remaining_prompts[0]
+		
+		prompt_cb.config(values=remaining_prompts)
+		current_prompt_name_var.set(next_prompt)
+		last_selected_prompt = next_prompt
+		
+		prompt_text.delete("1.0", tk.END)
+		prompt_text.insert(tk.END, prompts_dict.get(next_prompt, ""))
+		add_log(f"📝 Đã xóa Prompt: {curr_prompt}")
 
 
 def on_closing():
@@ -2994,6 +3255,8 @@ temp_var = tk.StringVar(value="0.5")
 drive_upload_var = tk.BooleanVar(value=False)
 drive_credentials_path_var = tk.StringVar()
 drive_folder_id_var = tk.StringVar()
+current_key_name_var = tk.StringVar(value="Mặc định")
+current_prompt_name_var = tk.StringVar(value="Mặc định")
 
 def get_effective_fallback_order():
 	model = model_var.get().strip()
@@ -3040,8 +3303,65 @@ tk.Label(
 	font=("Segoe UI", 9),
 ).grid(row=1, column=0, sticky="w", pady=(0, 6))
 
+api_key_select_frame = tk.Frame(card_api, bg=PALETTE["panel"])
+api_key_select_frame.grid(row=2, column=0, sticky="ew", pady=(0, 6))
+
+tk.Label(
+	api_key_select_frame,
+	text="Chọn API Key:",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	font=("Segoe UI", 9, "bold"),
+).pack(side="left", padx=(0, 6))
+
+api_key_cb = ttk.Combobox(
+	api_key_select_frame,
+	values=[],
+	textvariable=current_key_name_var,
+	state="readonly",
+	width=25,
+)
+api_key_cb.pack(side="left", padx=4)
+api_key_cb.bind("<<ComboboxSelected>>", on_api_key_select)
+
+tk.Button(
+	api_key_select_frame,
+	text="Đổi tên",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=rename_api_key,
+).pack(side="left", padx=4)
+
+tk.Button(
+	api_key_select_frame,
+	text="Thêm mới",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=add_new_api_key,
+).pack(side="left", padx=4)
+
+tk.Button(
+	api_key_select_frame,
+	text="Xóa",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["warn"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=delete_api_key,
+).pack(side="left", padx=4)
+
 api_key_frame = tk.Frame(card_api, bg=PALETTE["panel"])
-api_key_frame.grid(row=2, column=0, sticky="ew")
+api_key_frame.grid(row=3, column=0, sticky="ew")
 api_key_frame.columnconfigure(0, weight=1)
 
 api_key_entry = tk.Entry(api_key_frame, show="*", width=70, **entry_opts)
@@ -3133,7 +3453,7 @@ tk.Label(
 	bg=PALETTE["panel"],
 	fg=PALETTE["accent_alt"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=3, column=0, sticky="w", pady=(4, 0))
+).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
 card_files = build_card(translate_tab, "📂 Chọn file nguồn / đích", 0, 2)
 tk.Label(
@@ -3435,13 +3755,62 @@ glossary_text = tk.Text(
 glossary_text.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
 glossary_text.insert(tk.END, DEFAULT_GLOSSARY)
 
+prompt_header_frame = tk.Frame(card_prompt, bg=PALETTE["panel"])
+prompt_header_frame.grid(row=3, column=0, sticky="ew", pady=(0, 4))
+
 tk.Label(
-	card_prompt,
-	text="Prompt dịch giả",
+	prompt_header_frame,
+	text="Chọn Prompt:",
 	bg=PALETTE["panel"],
-	fg=PALETTE["text_muted"],
+	fg=PALETTE["text"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=3, column=0, sticky="w", pady=(0, 4))
+).pack(side="left", padx=(0, 6))
+
+prompt_cb = ttk.Combobox(
+	prompt_header_frame,
+	values=[],
+	textvariable=current_prompt_name_var,
+	state="readonly",
+	width=25,
+)
+prompt_cb.pack(side="left", padx=4)
+prompt_cb.bind("<<ComboboxSelected>>", on_prompt_select)
+
+tk.Button(
+	prompt_header_frame,
+	text="Đổi tên",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=rename_prompt,
+).pack(side="left", padx=4)
+
+tk.Button(
+	prompt_header_frame,
+	text="Thêm mới",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=add_new_prompt,
+).pack(side="left", padx=4)
+
+tk.Button(
+	prompt_header_frame,
+	text="Xóa",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["warn"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=delete_prompt,
+).pack(side="left", padx=4)
 
 prompt_text = tk.Text(
 	card_prompt,

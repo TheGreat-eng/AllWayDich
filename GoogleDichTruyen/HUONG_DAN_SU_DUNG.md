@@ -27,6 +27,7 @@ python GoogleDichTruyen.py
 ## 4) Chuẩn bị trước khi dịch
 ### API key
 - Nhập **Gemini API Key** lấy từ Google AI Studio.
+- Hỗ trợ quản lý và lưu trữ nhiều API Key khác nhau. Bạn có thể chọn nhanh từ thanh chọn, đổi tên, thêm mới hoặc xóa key.
 - Key được mã hóa khi lưu trong `app_settings.json` (ưu tiên dùng lại trên cùng máy/user).
 
 ### File đầu vào
@@ -56,10 +57,10 @@ python GoogleDichTruyen.py
 Nếu nhập ngoài khoảng này, app sẽ báo lỗi trước khi chạy.
 
 ## 6) Quy trình dịch
-1. Nhập Gemini API key
+1. Chọn hoặc thêm mới/đổi tên Gemini API key phù hợp
 2. Chọn file input `.txt`
 3. Chọn model, số luồng, chunk size, max output tokens, nhiệt độ
-4. (Tuỳ chọn) chỉnh prompt trong ô **Prompt dịch giả**
+4. Chọn hoặc thêm mới/đổi tên Prompt dịch giả trong ô **Prompt dịch giả**
 5. Bấm **🚀 BẮT ĐẦU DỊCH**
 
 Trong lúc dịch:
