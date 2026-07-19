@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, scrolledtext
+from tkinter import filedialog, messagebox, ttk, scrolledtext, simpledialog
 import os
 import concurrent.futures
 import time
@@ -10,8 +10,26 @@ import random
 import base64
 import hashlib
 import re
+import mimetypes
+import webbrowser
+
 import urllib.request
 import urllib.error
+
+try:
+	from google.oauth2.credentials import Credentials
+	from googleapiclient.discovery import build
+	from googleapiclient.errors import HttpError
+	from googleapiclient.http import MediaFileUpload
+	from google_auth_oauthlib.flow import InstalledAppFlow
+	from google.auth.transport.requests import Request
+except ImportError:
+	Credentials = None
+	build = None
+	HttpError = None
+	MediaFileUpload = None
+	InstalledAppFlow = None
+	Request = None
 
 
 # ================= CẤU HÌNH DEEPSEEK =================
@@ -24,7 +42,7 @@ MODELS = [
 
 DEEPSEEK_API_BASE = "https://api.deepseek.com"
 
-CHUNK_SIZE = 3000
+CHUNK_SIZE = 4000
 MAX_OUTPUT_TOKENS = 8192
 DEFAULT_SCAN_CHAR_LIMIT = 10000
 
@@ -66,27 +84,23 @@ stats = {
 
 
 MODEL_PRICING = {
-	# Theo docs DeepSeek (Models & Pricing) tại thời điểm 2026-04-24.
-	# Input cache-hit/cache-miss được tách riêng. Nếu API không trả cache tokens,
-	# app sẽ coi toàn bộ input là cache-miss để ước tính an toàn.
 	"deepseek-v4-flash": {
-		"input_cache_hit_per_1m": 0.028,
+		"input_cache_hit_per_1m": 0.0028,
 		"input_cache_miss_per_1m": 0.14,
 		"output_per_1m": 0.28,
 	},
 	"deepseek-v4-pro": {
-		"input_cache_hit_per_1m": 0.145,
-		"input_cache_miss_per_1m": 1.74,
-		"output_per_1m": 3.48,
+		"input_cache_hit_per_1m": 0.003625,
+		"input_cache_miss_per_1m": 0.435,
+		"output_per_1m": 0.87,
 	},
-	# Legacy aliases (dự kiến deprecate, giữ để tương thích).
 	"deepseek-chat": {
-		"input_cache_hit_per_1m": 0.028,
+		"input_cache_hit_per_1m": 0.0028,
 		"input_cache_miss_per_1m": 0.14,
 		"output_per_1m": 0.28,
 	},
 	"deepseek-reasoner": {
-		"input_cache_hit_per_1m": 0.028,
+		"input_cache_hit_per_1m": 0.0028,
 		"input_cache_miss_per_1m": 0.14,
 		"output_per_1m": 0.28,
 	},
@@ -94,14 +108,23 @@ MODEL_PRICING = {
 
 USD_TO_VND = 27000
 
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+DRIVE_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drive_token.json")
+
+
+# ================= QUOTA & ERROR HANDLING =================
+def is_quota_exceeded_error(error_str: str) -> bool:
+	"""Check if error is due to quota/rate limit (429 RESOURCE_EXHAUSTED)."""
+	error_lower = str(error_str).lower()
+	return "429" in error_lower or "resource_exhausted" in error_lower or "quota" in error_lower or "rate limit" in error_lower
+
 
 def get_model_prices_usd_per_1m(model_id):
 	pricing = MODEL_PRICING.get(model_id, {})
 	if pricing:
 		return pricing
-	# Fallback mềm: model mới chưa map giá thì dùng mặt bằng flash.
 	return {
-		"input_cache_hit_per_1m": 0.028,
+		"input_cache_hit_per_1m": 0.0028,
 		"input_cache_miss_per_1m": 0.14,
 		"output_per_1m": 0.28,
 	}
@@ -187,6 +210,11 @@ def decrypt_api_key(encrypted_key: str) -> str:
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings.json")
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_history.json")
 
+api_keys_dict = {}
+prompts_dict = {}
+last_selected_key = "Mặc định"
+last_selected_prompt = "Mặc định"
+
 
 def load_settings():
 	default_settings = {
@@ -194,14 +222,25 @@ def load_settings():
 		"input_file": "",
 		"output_file": "",
 		"model": MODELS[0],
+		"quick_model": MODELS[0],
+		"thinking_level": "disabled",
+		"model_fallback_order": "|".join(MODELS),
 		"threads": "3",
 		"chunk_size": str(CHUNK_SIZE),
+		"chunk_split_mode": "keyword",
 		"max_output_tokens": str(MAX_OUTPUT_TOKENS),
 		"scan_char_limit": str(DEFAULT_SCAN_CHAR_LIMIT),
 		"temperature": "0.5",
 		"prompt": DEFAULT_PROMPT,
 		"glossary": DEFAULT_GLOSSARY,
 		"theme": "dark",
+		"drive_upload_enabled": False,
+		"drive_credentials_path": "",
+		"drive_folder_id": "",
+		"api_keys": {},
+		"current_key_name": "Mặc định",
+		"prompts": {},
+		"current_prompt_name": "Mặc định"
 	}
 
 	try:
@@ -210,10 +249,33 @@ def load_settings():
 				saved_settings = json.load(f)
 				default_settings.update(saved_settings)
 
+				# Decrypt the old single API key
+				old_api_key = ""
 				if saved_settings.get("api_key_encrypted"):
-					default_settings["api_key"] = decrypt_api_key(saved_settings["api_key_encrypted"])
-				else:
-					default_settings["api_key"] = ""
+					old_api_key = decrypt_api_key(saved_settings["api_key_encrypted"])
+				
+				# Load api_keys dict
+				api_keys = saved_settings.get("api_keys", {})
+				decrypted_api_keys = {}
+				for k_name, k_enc in api_keys.items():
+					decrypted_api_keys[k_name] = decrypt_api_key(k_enc)
+				
+				# Put old key under "Mặc định" if it's not already there
+				if old_api_key and "Mặc định" not in decrypted_api_keys:
+					decrypted_api_keys["Mặc định"] = old_api_key
+				if "Mặc định" not in decrypted_api_keys:
+					decrypted_api_keys["Mặc định"] = ""
+					
+				default_settings["api_keys"] = decrypted_api_keys
+				
+				# Load prompts dict
+				prompts = saved_settings.get("prompts", {})
+				old_prompt = saved_settings.get("prompt", DEFAULT_PROMPT)
+				if old_prompt and "Mặc định" not in prompts:
+					prompts["Mặc định"] = old_prompt
+				if "Mặc định" not in prompts:
+					prompts["Mặc định"] = DEFAULT_PROMPT
+				default_settings["prompts"] = prompts
 	except Exception as e:
 		print(f"Không thể tải cài đặt: {e}")
 
@@ -221,21 +283,47 @@ def load_settings():
 
 
 def save_settings():
-	api_key = api_key_entry.get().strip()
+	# Update the current selected key and prompt in memory
+	curr_key = current_key_name_var.get()
+	if curr_key:
+		api_keys_dict[curr_key] = api_key_entry.get().strip()
+		
+	curr_prompt = current_prompt_name_var.get()
+	if curr_prompt:
+		prompts_dict[curr_prompt] = prompt_text.get("1.0", tk.END).strip()
+
+	# Encrypt the api_keys dictionary values for saving
+	encrypted_api_keys = {}
+	for k_name, k_val in api_keys_dict.items():
+		encrypted_api_keys[k_name] = encrypt_api_key(k_val)
+
+	active_key = api_key_entry.get().strip()
+	active_prompt = prompt_text.get("1.0", tk.END).strip()
 
 	settings = {
-		"api_key_encrypted": encrypt_api_key(api_key),
+		"api_key_encrypted": encrypt_api_key(active_key),
 		"input_file": input_path.get(),
 		"output_file": output_path.get(),
 		"model": model_var.get(),
+		"quick_model": quick_model_var.get(),
+		"thinking_level": thinking_level_var.get(),
+		"model_fallback_order": model_fallback_order_var.get(),
 		"threads": thread_var.get(),
 		"chunk_size": chunk_size_var.get(),
+		"chunk_split_mode": chunk_split_mode_var.get(),
 		"max_output_tokens": max_output_tokens_var.get(),
 		"scan_char_limit": scan_char_limit_var.get(),
 		"temperature": temp_var.get(),
 		"glossary": glossary_text.get("1.0", tk.END).strip(),
-		"prompt": prompt_text.get("1.0", tk.END).strip(),
+		"prompt": active_prompt,
 		"theme": current_theme,
+		"drive_upload_enabled": bool(drive_upload_var.get()),
+		"drive_credentials_path": drive_credentials_path_var.get().strip(),
+		"drive_folder_id": drive_folder_id_var.get().strip(),
+		"api_keys": encrypted_api_keys,
+		"current_key_name": curr_key,
+		"prompts": prompts_dict,
+		"current_prompt_name": curr_prompt
 	}
 
 	try:
@@ -247,14 +335,42 @@ def save_settings():
 
 
 def apply_settings(settings):
-	global current_theme
+	global current_theme, api_keys_dict, prompts_dict, last_selected_key, last_selected_prompt
 
-	api_key_entry.insert(0, settings.get("api_key", ""))
+	api_keys_dict = settings.get("api_keys", {"Mặc định": ""})
+	prompts_dict = settings.get("prompts", {"Mặc định": DEFAULT_PROMPT})
+
+	curr_key = settings.get("current_key_name", "Mặc định")
+	if curr_key not in api_keys_dict:
+		curr_key = list(api_keys_dict.keys())[0] if api_keys_dict else "Mặc định"
+	current_key_name_var.set(curr_key)
+	last_selected_key = curr_key
+
+	curr_prompt = settings.get("current_prompt_name", "Mặc định")
+	if curr_prompt not in prompts_dict:
+		curr_prompt = list(prompts_dict.keys())[0] if prompts_dict else "Mặc định"
+	current_prompt_name_var.set(curr_prompt)
+	last_selected_prompt = curr_prompt
+
+	# Update Comboboxes list of values
+	try:
+		api_key_cb.config(values=list(api_keys_dict.keys()))
+		prompt_cb.config(values=list(prompts_dict.keys()))
+	except NameError:
+		pass
+
+	api_key_entry.delete(0, tk.END)
+	api_key_entry.insert(0, api_keys_dict.get(curr_key, ""))
+
 	input_path.set(settings.get("input_file", ""))
 	output_path.set(settings.get("output_file", ""))
 	model_var.set(settings.get("model", MODELS[0]))
+	quick_model_var.set(settings.get("quick_model", MODELS[0]))
+	thinking_level_var.set(settings.get("thinking_level", "disabled"))
+	model_fallback_order_var.set(settings.get("model_fallback_order", "|".join(MODELS)))
 	thread_var.set(settings.get("threads", "3"))
 	chunk_size_var.set(settings.get("chunk_size", str(CHUNK_SIZE)))
+	chunk_split_mode_var.set(settings.get("chunk_split_mode", "keyword"))
 	max_output_tokens_var.set(settings.get("max_output_tokens", str(MAX_OUTPUT_TOKENS)))
 	scan_char_limit_var.set(settings.get("scan_char_limit", str(DEFAULT_SCAN_CHAR_LIMIT)))
 	temp_var.set(settings.get("temperature", "0.5"))
@@ -263,9 +379,198 @@ def apply_settings(settings):
 	glossary_text.insert(tk.END, settings.get("glossary", DEFAULT_GLOSSARY))
 
 	prompt_text.delete("1.0", tk.END)
-	prompt_text.insert(tk.END, settings.get("prompt", DEFAULT_PROMPT))
+	prompt_text.insert(tk.END, prompts_dict.get(curr_prompt, DEFAULT_PROMPT))
 
 	current_theme = settings.get("theme", "dark")
+	drive_upload_var.set(bool(settings.get("drive_upload_enabled", False)))
+	drive_credentials_path_var.set(settings.get("drive_credentials_path", ""))
+	drive_folder_id_var.set(settings.get("drive_folder_id", ""))
+
+
+# ================= QUẢN LÝ NHIỀU API KEY & PROMPT =================
+def on_api_key_select(event=None):
+	global last_selected_key
+	new_key_name = current_key_name_var.get()
+	if not new_key_name:
+		return
+	
+	if last_selected_key in api_keys_dict:
+		api_keys_dict[last_selected_key] = api_key_entry.get().strip()
+		
+	api_key_entry.delete(0, tk.END)
+	api_key_entry.insert(0, api_keys_dict.get(new_key_name, ""))
+	
+	last_selected_key = new_key_name
+
+
+def add_new_api_key():
+	global last_selected_key
+	new_name = simpledialog.askstring("Thêm API Key mới", "Nhập tên cho API Key mới:")
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name:
+		return
+	
+	if new_name in api_keys_dict:
+		messagebox.showerror("Lỗi", "Tên API Key đã tồn tại!")
+		return
+		
+	if last_selected_key in api_keys_dict:
+		api_keys_dict[last_selected_key] = api_key_entry.get().strip()
+		
+	api_keys_dict[new_name] = ""
+	
+	api_key_cb.config(values=list(api_keys_dict.keys()))
+	current_key_name_var.set(new_name)
+	last_selected_key = new_name
+	
+	api_key_entry.delete(0, tk.END)
+	api_key_entry.focus_set()
+	add_log(f"🔑 Đã thêm API Key mới: {new_name}")
+
+
+def rename_api_key():
+	curr_key = current_key_name_var.get()
+	if not curr_key:
+		return
+		
+	new_name = simpledialog.askstring("Đổi tên API Key", f"Nhập tên mới cho API Key '{curr_key}':", initialvalue=curr_key)
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name or new_name == curr_key:
+		return
+		
+	if new_name in api_keys_dict:
+		messagebox.showerror("Lỗi", "Tên API Key mới đã tồn tại!")
+		return
+		
+	api_keys_dict[new_name] = api_keys_dict.pop(curr_key, api_key_entry.get().strip())
+	
+	api_key_cb.config(values=list(api_keys_dict.keys()))
+	current_key_name_var.set(new_name)
+	global last_selected_key
+	last_selected_key = new_name
+	add_log(f"🔑 Đã đổi tên API Key '{curr_key}' thành '{new_name}'")
+
+
+def delete_api_key():
+	global last_selected_key
+	curr_key = current_key_name_var.get()
+	if not curr_key:
+		return
+	
+	if len(api_keys_dict) <= 1:
+		messagebox.showwarning("Cảnh báo", "Không thể xóa API Key cuối cùng!")
+		return
+		
+	if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa API Key '{curr_key}'?"):
+		api_keys_dict.pop(curr_key, None)
+		
+		remaining_keys = list(api_keys_dict.keys())
+		next_key = remaining_keys[0]
+		
+		api_key_cb.config(values=remaining_keys)
+		current_key_name_var.set(next_key)
+		last_selected_key = next_key
+		
+		api_key_entry.delete(0, tk.END)
+		api_key_entry.insert(0, api_keys_dict.get(next_key, ""))
+		add_log(f"🔑 Đã xóa API Key: {curr_key}")
+
+
+def on_prompt_select(event=None):
+	global last_selected_prompt
+	new_prompt_name = current_prompt_name_var.get()
+	if not new_prompt_name:
+		return
+		
+	if last_selected_prompt in prompts_dict:
+		prompts_dict[last_selected_prompt] = prompt_text.get("1.0", tk.END).strip()
+		
+	prompt_text.delete("1.0", tk.END)
+	prompt_text.insert(tk.END, prompts_dict.get(new_prompt_name, ""))
+	
+	last_selected_prompt = new_prompt_name
+
+
+def add_new_prompt():
+	global last_selected_prompt
+	new_name = simpledialog.askstring("Thêm Prompt mới", "Nhập tên cho Prompt mới:")
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name:
+		return
+		
+	if new_name in prompts_dict:
+		messagebox.showerror("Lỗi", "Tên Prompt đã tồn tại!")
+		return
+		
+	if last_selected_prompt in prompts_dict:
+		prompts_dict[last_selected_prompt] = prompt_text.get("1.0", tk.END).strip()
+		
+	prompts_dict[new_name] = DEFAULT_PROMPT
+	
+	prompt_cb.config(values=list(prompts_dict.keys()))
+	current_prompt_name_var.set(new_name)
+	last_selected_prompt = new_name
+	
+	prompt_text.delete("1.0", tk.END)
+	prompt_text.insert(tk.END, DEFAULT_PROMPT)
+	prompt_text.focus_set()
+	add_log(f"📝 Đã thêm Prompt mới: {new_name}")
+
+
+def rename_prompt():
+	curr_prompt = current_prompt_name_var.get()
+	if not curr_prompt:
+		return
+		
+	new_name = simpledialog.askstring("Đổi tên Prompt", f"Nhập tên mới cho Prompt '{curr_prompt}':", initialvalue=curr_prompt)
+	if not new_name:
+		return
+	new_name = new_name.strip()
+	if not new_name or new_name == curr_prompt:
+		return
+		
+	if new_name in prompts_dict:
+		messagebox.showerror("Lỗi", "Tên Prompt mới đã tồn tại!")
+		return
+		
+	prompts_dict[new_name] = prompts_dict.pop(curr_prompt, prompt_text.get("1.0", tk.END).strip())
+	
+	prompt_cb.config(values=list(prompts_dict.keys()))
+	current_prompt_name_var.set(new_name)
+	global last_selected_prompt
+	last_selected_prompt = new_name
+	add_log(f"📝 Đã đổi tên Prompt '{curr_prompt}' thành '{new_name}'")
+
+
+def delete_prompt():
+	global last_selected_prompt
+	curr_prompt = current_prompt_name_var.get()
+	if not curr_prompt:
+		return
+		
+	if len(prompts_dict) <= 1:
+		messagebox.showwarning("Cảnh báo", "Không thể xóa Prompt cuối cùng!")
+		return
+		
+	if messagebox.askyesno("Xác nhận", f"Bạn có chắc muốn xóa Prompt '{curr_prompt}'?"):
+		prompts_dict.pop(curr_prompt, None)
+		
+		remaining_prompts = list(prompts_dict.keys())
+		next_prompt = remaining_prompts[0]
+		
+		prompt_cb.config(values=remaining_prompts)
+		current_prompt_name_var.set(next_prompt)
+		last_selected_prompt = next_prompt
+		
+		prompt_text.delete("1.0", tk.END)
+		prompt_text.insert(tk.END, prompts_dict.get(next_prompt, ""))
+		add_log(f"📝 Đã xóa Prompt: {curr_prompt}")
 
 
 def on_closing():
@@ -279,11 +584,69 @@ def get_checkpoint_path(input_file):
 	return f"{base_name}.resume.json"
 
 
-def build_default_output_path(input_file):
+def sanitize_filename_part(raw_value, fallback):
+	if not raw_value:
+		return fallback
+	cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(raw_value).strip())
+	cleaned = re.sub(r"-+", "-", cleaned).strip("-")
+	return cleaned or fallback
+
+
+def build_default_output_path(input_file, model_id=None):
 	input_dir = os.path.dirname(input_file)
 	input_name = os.path.splitext(os.path.basename(input_file))[0]
 	random_suffix = random.randint(1000, 9999)
-	return os.path.join(input_dir, f"Dich_{input_name}_{random_suffix}.txt")
+	model_token = sanitize_filename_part(model_id, "model")
+	date_token = datetime.datetime.now().strftime("%Y-%m-%d")
+	return os.path.join(
+		input_dir,
+		f"Dich_{input_name}_{model_token}_{date_token}_{random_suffix}.txt",
+	)
+
+
+def ensure_drive_dependencies():
+	return all([Credentials, build, MediaFileUpload, InstalledAppFlow, Request])
+
+
+def get_drive_credentials(credentials_path, token_path):
+	if not credentials_path or not os.path.isfile(credentials_path):
+		raise FileNotFoundError("Không tìm thấy file credentials Google Drive.")
+
+	creds = None
+	if token_path and os.path.exists(token_path):
+		creds = Credentials.from_authorized_user_file(token_path, DRIVE_SCOPES)
+
+	if not creds or not creds.valid:
+		if creds and creds.expired and creds.refresh_token:
+			creds.refresh(Request())
+		else:
+			flow = InstalledAppFlow.from_client_secrets_file(credentials_path, DRIVE_SCOPES)
+			creds = flow.run_local_server(port=0)
+		if token_path:
+			with open(token_path, "w", encoding="utf-8") as token_file:
+				token_file.write(creds.to_json())
+
+	return creds
+
+
+def upload_file_to_drive(file_path, credentials_path, folder_id="", token_path=DRIVE_TOKEN_FILE):
+	if not ensure_drive_dependencies():
+		raise RuntimeError("Thiếu thư viện Google Drive API.")
+	if not file_path or not os.path.isfile(file_path):
+		raise FileNotFoundError("Không tìm thấy file output để upload.")
+
+	creds = get_drive_credentials(credentials_path, token_path)
+	service = build("drive", "v3", credentials=creds)
+	mime_type, _ = mimetypes.guess_type(file_path)
+	media = MediaFileUpload(file_path, mimetype=mime_type or "application/octet-stream", resumable=True)
+	metadata = {"name": os.path.basename(file_path)}
+	if folder_id:
+		metadata["parents"] = [folder_id]
+
+	result = service.files().create(body=metadata, media_body=media, fields="id,name,webViewLink").execute()
+	file_id = result.get("id", "")
+	web_link = result.get("webViewLink") or (f"https://drive.google.com/file/d/{file_id}/view" if file_id else "")
+	return file_id, web_link
 
 
 def add_log(message):
@@ -307,7 +670,100 @@ def add_log(message):
 		except Exception:
 			pass
 
-	print(log_message.strip())
+	try:
+		print(log_message.strip())
+	except UnicodeEncodeError:
+		try:
+			print(log_message.strip().encode('ascii', errors='replace').decode('ascii'))
+		except Exception:
+			pass
+
+
+def show_completion_dialog(title, message, drive_link=""):
+	if threading.current_thread() is not threading.main_thread():
+		if "root" in globals() and root.winfo_exists():
+			root.after(0, lambda: show_completion_dialog(title, message, drive_link))
+		return
+
+	win = tk.Toplevel(root)
+	win.title(title)
+	win.configure(bg=PALETTE["panel"])
+	win.transient(root)
+	win.grab_set()
+	win.resizable(False, False)
+
+	container = tk.Frame(win, bg=PALETTE["panel"], padx=16, pady=14)
+	container.pack(fill="both", expand=True)
+
+	msg_label = tk.Label(
+		container,
+		text=message,
+		bg=PALETTE["panel"],
+		fg=PALETTE["text"],
+		justify="left",
+		wraplength=520,
+		font=("Segoe UI", 9),
+	)
+	msg_label.pack(anchor="w")
+
+	if drive_link:
+		link_label = tk.Label(
+			container,
+			text=drive_link,
+			bg=PALETTE["panel"],
+			fg=PALETTE["accent_alt"],
+			cursor="hand2",
+			justify="left",
+			wraplength=520,
+			font=("Segoe UI", 9, "underline"),
+		)
+		link_label.pack(anchor="w", pady=(8, 0))
+		link_label.bind("<Button-1>", lambda _evt: webbrowser.open(drive_link))
+
+	btn_row = tk.Frame(container, bg=PALETTE["panel"])
+	btn_row.pack(fill="x", pady=(12, 0))
+
+	def _copy_link():
+		if not drive_link:
+			return
+		root.clipboard_clear()
+		root.clipboard_append(drive_link)
+
+	if drive_link:
+		tk.Button(
+			btn_row,
+			text="Mở Google Drive",
+			bg=PALETTE["accent_alt"],
+			fg="#0b0f19",
+			bd=0,
+			padx=10,
+			pady=6,
+			command=lambda: webbrowser.open(drive_link),
+		).pack(side="left")
+		tk.Button(
+			btn_row,
+			text="Copy link",
+			bg=PALETTE["ok"],
+			fg="#0b0f19",
+			bd=0,
+			padx=10,
+			pady=6,
+			command=_copy_link,
+		).pack(side="left", padx=(8, 0))
+
+	tk.Button(
+		btn_row,
+		text="OK",
+		bg=PALETTE["accent"],
+		fg="#0b0f19",
+		bd=0,
+		padx=12,
+		pady=6,
+		command=win.destroy,
+	).pack(side="right")
+
+	win.update_idletasks()
+	win.geometry(f"{min(620, win.winfo_reqwidth())}x{win.winfo_reqheight()}")
 
 
 def parse_glossary(raw_text):
@@ -358,20 +814,37 @@ def build_prompt_with_glossary(base_prompt, glossary_entries):
 	return f"{base_prompt}\n{glossary_instruction}"
 
 
+checkpoint_lock = threading.Lock()
+
+
+def read_file_content_safely(file_path):
+	encodings = ["utf-8", "utf-8-sig", "utf-16", "cp1258", "cp1252", "latin-1"]
+	for enc in encodings:
+		try:
+			with open(file_path, "r", encoding=enc) as f:
+				return f.read()
+		except UnicodeDecodeError:
+			continue
+	# Fallback to utf-8 with errors='replace' to never fail
+	with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+		return f.read()
+
+
 def save_checkpoint(cp_file, index, text):
-	try:
-		if os.path.exists(cp_file):
-			with open(cp_file, "r", encoding="utf-8") as f:
-				data = json.load(f)
-		else:
-			data = {}
+	with checkpoint_lock:
+		try:
+			if os.path.exists(cp_file):
+				with open(cp_file, "r", encoding="utf-8") as f:
+					data = json.load(f)
+			else:
+				data = {}
 
-		data[str(index)] = text
+			data[str(index)] = text
 
-		with open(cp_file, "w", encoding="utf-8") as f:
-			json.dump(data, f, ensure_ascii=False, indent=2)
-	except Exception as e:
-		print(f"Lỗi khi lưu checkpoint: {e}")
+			with open(cp_file, "w", encoding="utf-8") as f:
+				json.dump(data, f, ensure_ascii=False, indent=2)
+		except Exception as e:
+			print(f"Lỗi khi lưu checkpoint: {e}")
 
 
 def format_time(seconds):
@@ -408,9 +881,52 @@ def save_translation_history_entry(entry, max_entries=200):
 		print(f"Không thể lưu lịch sử dịch: {e}")
 
 
+history_display_map = {}
+request_display_map = {}
+request_detail_tabs = {}
+request_detail_tables = {}
+request_minute_counts = {}
+request_minute_lock = threading.Lock()
+
+
+def show_history_entry_dialog(entry):
+	status = str(entry.get("status", "--")).upper()
+	start_at = entry.get("start_at", "--")
+	end_at = entry.get("end_at", "--")
+	duration_seconds = entry.get("duration_seconds", 0)
+	output_file = entry.get("output_file", "")
+	total_cost = float(entry.get("total_cost_usd", 0.0) or 0.0)
+	total_cost_vnd = float(entry.get("total_cost_vnd", total_cost * USD_TO_VND) or 0.0)
+	drive_link = entry.get("drive_link", "")
+
+	message = (
+		f"Trạng thái: {status}\n"
+		f"Bắt đầu: {start_at}\n"
+		f"Kết thúc: {end_at}\n"
+		f"Thời gian: {format_time(duration_seconds)}\n"
+		f"Tổng tiền: ${total_cost:.4f}\n"
+		f"Tổng tiền Việt: {int(round(total_cost_vnd)):,} đ\n"
+		f"Lưu tại: {output_file}"
+	)
+	show_completion_dialog("Lịch sử dịch", message, drive_link)
+
+
+def on_history_row_click(event):
+	if "history_table" not in globals():
+		return
+	row_id = history_table.identify_row(event.y)
+	if not row_id:
+		return
+	entry = history_display_map.get(row_id)
+	if entry:
+		show_history_entry_dialog(entry)
+
+
 def refresh_history_display():
 	if "history_table" not in globals():
 		return
+
+	history_display_map.clear()
 
 	history = load_translation_history()
 	for row_id in history_table.get_children():
@@ -449,7 +965,7 @@ def refresh_history_display():
 			row_tag = "even" if idx % 2 == 0 else "odd"
 			status_tag = f"status_{status.lower()}"
 
-			history_table.insert(
+			row_id = history_table.insert(
 				"",
 				tk.END,
 				values=(
@@ -468,6 +984,12 @@ def refresh_history_display():
 				),
 				tags=(row_tag, status_tag),
 			)
+			history_display_map[row_id] = item
+
+	try:
+		refresh_request_stats_display()
+	except NameError:
+		pass
 
 
 def clear_translation_history():
@@ -479,12 +1001,258 @@ def clear_translation_history():
 			json.dump([], f, ensure_ascii=False, indent=2)
 		refresh_history_display()
 		try:
+			refresh_request_stats_display()
+		except NameError:
+			pass
+		try:
 			refresh_cost_stats()
 		except NameError:
 			pass
 		add_log("🧹 Đã xóa toàn bộ lịch sử dịch.")
 	except Exception as e:
 		messagebox.showerror("Lỗi", f"Không thể xóa lịch sử dịch: {e}")
+
+
+def reset_request_metrics():
+	with request_minute_lock:
+		request_minute_counts.clear()
+
+
+def record_request_event(model_id=None):
+	minute_key = time.strftime("%Y-%m-%d %H:%M")
+	model_key = str(model_id or "unknown")
+	with request_minute_lock:
+		if minute_key not in request_minute_counts:
+			request_minute_counts[minute_key] = {}
+		request_minute_counts[minute_key][model_key] = request_minute_counts[minute_key].get(model_key, 0) + 1
+
+
+def get_request_metrics_snapshot():
+	with request_minute_lock:
+		minute_items = sorted(request_minute_counts.items())
+	result = []
+	for minute, model_counts in minute_items:
+		if isinstance(model_counts, dict):
+			for model_name, count in sorted(model_counts.items()):
+				result.append({"minute": minute, "model": str(model_name), "count": int(count or 0)})
+		else:
+			result.append({"minute": minute, "model": "unknown", "count": int(model_counts or 0)})
+	return result
+
+
+def build_request_entry_key(entry):
+	start_at = str(entry.get("start_at", ""))
+	output_file = str(entry.get("output_file", ""))
+	model = str(entry.get("model", ""))
+	return f"{start_at}|{output_file}|{model}"
+
+
+def normalize_request_counts(entry):
+	raw = entry.get("request_counts_by_minute", [])
+	items = []
+	if isinstance(raw, dict):
+		for minute, count in raw.items():
+			items.append({"minute": str(minute), "model": str(entry.get("model", "unknown")), "count": int(count or 0)})
+	elif isinstance(raw, list):
+		for item in raw:
+			if not isinstance(item, dict):
+				continue
+			minute = item.get("minute")
+			if minute is None:
+				continue
+			items.append({
+				"minute": str(minute),
+				"model": str(item.get("model", entry.get("model", "unknown"))),
+				"count": int(item.get("count", 0) or 0),
+			})
+	items.sort(key=lambda x: (x["minute"], x["model"]))
+	return items
+
+
+def summarize_request_counts(counts):
+	total_requests = sum(item["count"] for item in counts)
+	minute_totals = {}
+	model_totals = {}
+	for item in counts:
+		minute = item["minute"]
+		model = item.get("model", "unknown")
+		minute_totals[minute] = minute_totals.get(minute, 0) + item["count"]
+		model_totals[model] = model_totals.get(model, 0) + item["count"]
+	peak_requests_per_minute = max(minute_totals.values(), default=0)
+	return total_requests, peak_requests_per_minute, model_totals
+
+
+def open_request_detail_tab(entry):
+	if "tabs" not in globals():
+		return
+
+	key = build_request_entry_key(entry)
+	if key in request_detail_tabs:
+		tabs.select(request_detail_tabs[key])
+		return
+
+	start_at = entry.get("start_at", "--")
+	status = str(entry.get("status", "--")).upper()
+	model = entry.get("model", "--")
+	duration = format_time(entry.get("duration_seconds", 0))
+	counts = normalize_request_counts(entry)
+	default_total, default_peak, model_totals = summarize_request_counts(counts)
+	total_requests = int(entry.get("total_requests", default_total) or 0)
+	peak_rpm = int(entry.get("peak_requests_per_minute", default_peak) or 0)
+	model_summary = ", ".join([f"{name}: {count:,}" for name, count in sorted(model_totals.items())]) or model
+
+	detail_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+	tab_title = f"🕒 Request {start_at}"
+	tabs.add(detail_tab, text=tab_title)
+
+	request_detail_tabs[key] = detail_tab
+	request_detail_tables[key] = None
+
+	detail_tab.columnconfigure(0, weight=1)
+	detail_tab.rowconfigure(1, weight=1)
+
+	toolbar = tk.Frame(detail_tab, bg=PALETTE["panel"])
+	toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+	toolbar.columnconfigure(0, weight=1)
+
+	summary_text = (
+		f"Bắt đầu: {start_at} | Trạng thái: {status} | "
+		f"Model: {model_summary} | Tổng request: {total_requests:,} | "
+		f"Peak/phút: {peak_rpm:,} | Thời gian: {duration}"
+	)
+	request_summary_label = tk.Label(
+		toolbar,
+		text=summary_text,
+		bg=PALETTE["panel"],
+		fg="#000000",
+		font=("Segoe UI", 9),
+	)
+	request_summary_label.grid(row=0, column=0, sticky="w", padx=8, pady=6)
+
+	def _close_request_tab():
+		if key in request_detail_tabs:
+			request_detail_tabs.pop(key, None)
+			request_detail_tables.pop(key, None)
+			try:
+				tabs.forget(detail_tab)
+			except Exception:
+				pass
+			try:
+				detail_tab.destroy()
+			except Exception:
+				pass
+
+	close_btn = tk.Button(
+		toolbar,
+		text="❌ Đóng tab",
+		font=("Segoe UI", 9, "bold"),
+		bg=PALETTE["warn"],
+		fg="#0b0f19",
+		bd=0,
+		padx=10,
+		pady=5,
+		command=_close_request_tab,
+	)
+	close_btn.grid(row=0, column=1, padx=8, pady=4)
+
+	table_frame = tk.Frame(detail_tab, bg=PALETTE["panel"])
+	table_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+	table_frame.columnconfigure(0, weight=1)
+	table_frame.rowconfigure(0, weight=1)
+
+	columns = ("minute", "model", "count")
+	request_detail_table = ttk.Treeview(
+		table_frame,
+		columns=columns,
+		show="headings",
+		style="History.Treeview",
+	)
+	request_detail_table.grid(row=0, column=0, sticky="nsew")
+
+	request_detail_table.heading("minute", text="Phút")
+	request_detail_table.heading("model", text="Model")
+	request_detail_table.heading("count", text="Số request")
+	request_detail_table.column("minute", width=180, anchor="w")
+	request_detail_table.column("model", width=200, anchor="w")
+	request_detail_table.column("count", width=120, anchor="e")
+	request_detail_table.tag_configure("odd", background=PALETTE["input_bg"])
+	request_detail_table.tag_configure("even", background=PALETTE["panel"])
+
+	scroll_y = ttk.Scrollbar(table_frame, orient="vertical", command=request_detail_table.yview)
+	scroll_y.grid(row=0, column=1, sticky="ns")
+	request_detail_table.configure(yscrollcommand=scroll_y.set)
+
+	request_detail_tables[key] = request_detail_table
+
+	if not counts:
+		request_detail_table.insert("", tk.END, values=("Chưa có dữ liệu", "--", "0"), tags=("odd",))
+	else:
+		for idx, item in enumerate(counts, 1):
+			row_tag = "even" if idx % 2 == 0 else "odd"
+			request_detail_table.insert(
+				"",
+				tk.END,
+				values=(item["minute"], item.get("model", "unknown"), f"{item['count']:,}"),
+				tags=(row_tag,),
+			)
+
+	tabs.select(detail_tab)
+
+
+def on_request_row_click(event):
+	if "requests_table" not in globals():
+		return
+	row_id = requests_table.identify_row(event.y)
+	if not row_id:
+		return
+	entry = request_display_map.get(row_id)
+	if entry:
+		open_request_detail_tab(entry)
+
+
+def refresh_request_stats_display():
+	if "requests_table" not in globals():
+		return
+
+	request_display_map.clear()
+	for row_id in requests_table.get_children():
+		requests_table.delete(row_id)
+
+	history = load_translation_history()
+	if not history:
+		requests_hint_var.set("Chưa có lịch sử dịch.")
+		return
+
+	requests_hint_var.set("Hiển thị danh sách bản dịch (nhấn để xem request/phút).")
+	for idx, item in enumerate(reversed(history), 1):
+		start_at = item.get("start_at", "--")
+		status = str(item.get("status", "--")).upper()
+		model = item.get("model", "--")
+		duration = format_time(item.get("duration_seconds", 0))
+		counts = normalize_request_counts(item)
+		default_total, default_peak, _ = summarize_request_counts(counts)
+		total_requests = int(item.get("total_requests", default_total) or 0)
+		peak_rpm = int(item.get("peak_requests_per_minute", default_peak) or 0)
+		in_file = os.path.basename(item.get("input_file", ""))
+		out_file = os.path.basename(item.get("output_file", ""))
+		row_tag = "even" if idx % 2 == 0 else "odd"
+		status_tag = f"status_{status.lower()}"
+
+		row_id = requests_table.insert(
+			"",
+			tk.END,
+			values=(
+				start_at,
+				status,
+				model,
+				f"{total_requests:,}",
+				f"{peak_rpm:,}",
+				duration,
+				f"{in_file} → {out_file}",
+			),
+			tags=(row_tag, status_tag),
+		)
+		request_display_map[row_id] = item
 
 
 def update_stats_display():
@@ -536,11 +1304,11 @@ def apply_theme():
 	root.configure(bg=PALETTE["bg"])
 	canvas_bg.configure(bg=PALETTE["bg"])
 
-	scrollbar.configure(
-		bg=PALETTE["border"],
-		troughcolor=PALETTE["bg"],
-		activebackground=PALETTE["accent"],
-	)
+	# Note: ttk.Scrollbar doesn't support custom bg/troughcolor (use Style instead if needed)
+	# scrollbar.configure(
+	# 	troughcolor=PALETTE["bg"],
+	# 	activebackground=PALETTE["accent"],
+	# )
 
 	style.configure("Card.TFrame", background=PALETTE["panel"])
 	style.configure("TLabel", background=PALETTE["panel"], foreground=PALETTE["text"])
@@ -586,12 +1354,29 @@ def apply_theme():
 		history_table.tag_configure("status_stopped", foreground="#000000")
 		history_table.tag_configure("status_error", foreground="#000000")
 
+	if "requests_table" in globals():
+		requests_table.tag_configure("odd", background=PALETTE["input_bg"])
+		requests_table.tag_configure("even", background=PALETTE["panel"])
+		requests_table.tag_configure("status_completed", foreground="#000000")
+		requests_table.tag_configure("status_stopped", foreground="#000000")
+		requests_table.tag_configure("status_error", foreground="#000000")
+
+	if "request_detail_tables" in globals():
+		for table in request_detail_tables.values():
+			if not table:
+				continue
+			table.tag_configure("odd", background=PALETTE["input_bg"])
+			table.tag_configure("even", background=PALETTE["panel"])
+
 	if "cost_tree_table" in globals():
 		cost_tree_table.tag_configure("month_row", background=PALETTE["accent"], foreground="#000000", font=("Segoe UI", 10, "bold"))
 		cost_tree_table.tag_configure("week_row", background=PALETTE["input_bg"], foreground=PALETTE["text"])
 
 	if "history_hint_label" in globals():
 		history_hint_label.configure(bg=PALETTE["panel"], fg="#000000")
+
+	if "requests_hint_label" in globals():
+		requests_hint_label.configure(bg=PALETTE["panel"], fg="#000000")
 
 	main_container.configure(bg=PALETTE["bg"])
 	main_frame.configure(bg=PALETTE["bg"])
@@ -642,12 +1427,18 @@ def update_widget_colors(widget):
 
 
 # ================= CHIA CHUNK =================
-def split_text(text, size=CHUNK_SIZE):
+def split_text(text, size=CHUNK_SIZE, split_mode="keyword"):
 	chunks = []
 	current_chunk = ""
 	
-	# Nhận diện: "Chương X", "Thứ X chương", "Hồi X", "Quyển X"
-	pattern = re.compile(r"^\s*(Chương\s+\w+|Thứ\s+\w+\s+chương|Hồi\s+\w+|Quyển\s+\w+)", re.IGNORECASE)
+	# Nhận diện chương mới (khớp đầu dòng, không phân biệt hoa/thường).
+	keyword_patterns = [
+		r"^\s*(chương|chap(?:ter)?|hồi|quyển|tập|thiên|phần|mục|tiết|ngoại\s*(truyện|chương)|phiên\s*ngoại|đệ\s+\w+\s+chương|thứ\s+\w+\s+chương)\b",
+		r"^\s*(ch\.|chap\.|c\.|q\.|t\.)\s*\d+\b",
+	]
+	_equals_pattern = r"^\s*={3,}\s*(thứ\s+\w+\s+chương|chương\s+\w+|chap(?:ter)?\s+\w+|hồi\s+\w+|quyển\s+\w+|tập\s+\w+|thiên\s+\w+|phần\s+\w+|mục\s+\w+|tiết\s+\w+)\b.*(?:={3,}\s*)?$"
+	active_patterns = [_equals_pattern] if split_mode == "equals" else keyword_patterns
+	active_matchers = [re.compile(p, re.IGNORECASE) for p in active_patterns]
 	
 	lines = text.splitlines(True)
 	
@@ -656,7 +1447,7 @@ def split_text(text, size=CHUNK_SIZE):
 	current_block = ""
 	
 	for line in lines:
-		if pattern.match(line):
+		if any(matcher.match(line) for matcher in active_matchers):
 			if current_block.strip():
 				blocks.append(current_block)
 			current_block = line
@@ -694,7 +1485,18 @@ def split_text(text, size=CHUNK_SIZE):
 								if len(temp_str2) + len(s_text) > size:
 									if temp_str2.strip():
 										chunks.append(temp_str2)
-									temp_str2 = s_text
+										temp_str2 = ""
+									
+									if len(s_text) > size:
+										# Split s_text into pieces of size
+										for k in range(0, len(s_text), size):
+											sub_s = s_text[k:k+size]
+											if len(sub_s) < size or k + size >= len(s_text):
+												temp_str2 = sub_s
+											else:
+												chunks.append(sub_s)
+									else:
+										temp_str2 = s_text
 								else:
 									temp_str2 += s_text
 							temp_str = temp_str2
@@ -716,55 +1518,106 @@ def split_text(text, size=CHUNK_SIZE):
 	return chunks
 
 
-def _safe_int(value):
+def extract_json_from_response(raw_text):
+	if not raw_text:
+		return None
+
+	text = raw_text.strip()
+	if text.startswith("```"):
+		lines = text.splitlines()
+		if lines:
+			lines = lines[1:]
+			if lines and lines[-1].strip().startswith("```"):
+				lines = lines[:-1]
+			text = "\n".join(lines).strip()
+
 	try:
-		return int(value)
+		return json.loads(text)
 	except Exception:
+		pass
+
+	start = text.find("{")
+	end = text.rfind("}")
+	if start != -1 and end != -1 and end > start:
+		candidate = text[start : end + 1]
+		try:
+			return json.loads(candidate)
+		except Exception:
+			return None
+
+	return None
+
+
+def is_deepseek_thinking_supported(model_name):
+	if not model_name:
+		return False
+	model_lower = model_name.lower()
+	return "v4" in model_lower or "reasoner" in model_lower
+
+
+def translate_with_deepseek(model_id, prompt, chunk, temperature, max_output_tokens, thinking_level=None):
+	"""Translate text using DeepSeek. Returns (text, input_tokens, output_tokens, error_code, cache_hit_tokens, cache_miss_tokens).
+	Error codes: None = success, 'QUOTA' = rate limit exceeded, 'ERROR' = other error.
+	"""
+	def _safe_int(value):
+		try:
+			return int(value)
+		except Exception:
+			return 0
+
+	def _usage_get(usage_obj, keys):
+		for key in keys:
+			value = usage_obj.get(key)
+			if value is not None:
+				return _safe_int(value)
 		return 0
 
+	def _safe_str(value):
+		if value is None:
+			return ""
+		try:
+			return str(value)
+		except Exception:
+			return ""
 
-def _usage_get(usage_obj, keys):
-	for key in keys:
-		value = usage_obj.get(key)
-		if value is not None:
-			return _safe_int(value)
-	return 0
+	api_key = ""
+	if "api_key_entry" in globals() and api_key_entry.winfo_exists():
+		api_key = api_key_entry.get().strip()
 
-
-def _safe_str(value):
-	if value is None:
-		return ""
-	try:
-		return str(value)
-	except Exception:
-		return ""
-
-
-def translate_with_deepseek(model_id, prompt, chunk, temperature, max_output_tokens):
-	api_key = api_key_entry.get().strip()
 	full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
+
+	if thinking_level is None:
+		if "thinking_level_var" in globals():
+			thinking_level = thinking_level_var.get().lower().strip()
+		else:
+			thinking_level = "disabled"
+
 	payload = {
 		"model": model_id,
 		"messages": [
-			{"role": "system", "content": "Bạn là một biên tập viên truyện dịch chuyên nghiệp."},
+			{"role": "system", "content": "Bạn là một biên tập viên truyện dịch chuyên nghiệp, thành thạo tiếng Trung và tiếng Việt."},
 			{"role": "user", "content": full_prompt},
 		],
 		"max_tokens": max_output_tokens,
-		"temperature": temperature,
 		"stream": False,
 	}
 
-	req = urllib.request.Request(
-		url=f"{DEEPSEEK_API_BASE}/chat/completions",
-		data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-		headers={
-			"Content-Type": "application/json",
-			"Authorization": f"Bearer {api_key}",
-		},
-		method="POST",
-	)
+	if thinking_level in ["high", "max"]:
+		payload["thinking"] = {"type": "enabled"}
+		payload["reasoning_effort"] = thinking_level
+	else:
+		payload["temperature"] = temperature
 
 	try:
+		req = urllib.request.Request(
+			url=f"{DEEPSEEK_API_BASE}/chat/completions",
+			data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+			headers={
+				"Content-Type": "application/json",
+				"Authorization": f"Bearer {api_key}",
+			},
+			method="POST",
+		)
 		with urllib.request.urlopen(req, timeout=180) as resp:
 			raw_data = resp.read().decode("utf-8")
 			response_data = json.loads(raw_data)
@@ -774,9 +1627,17 @@ def translate_with_deepseek(model_id, prompt, chunk, temperature, max_output_tok
 			err_body = e.read().decode("utf-8", errors="ignore")
 		except Exception:
 			pass
-		raise RuntimeError(f"HTTP {e.code}: {err_body[:300]}")
+		error_str = f"HTTP {e.code}: {err_body[:300]}"
+		if e.code == 429 or "429" in error_str or is_quota_exceeded_error(error_str):
+			return None, 0, 0, 'QUOTA', 0, 0
+		else:
+			return None, 0, 0, error_str, 0, 0
 	except Exception as e:
-		raise RuntimeError(f"Lỗi kết nối DeepSeek: {e}")
+		error_str = str(e)
+		if is_quota_exceeded_error(error_str):
+			return None, 0, 0, 'QUOTA', 0, 0
+		else:
+			return None, 0, 0, error_str, 0, 0
 
 	usage_data = response_data.get("usage", {}) or {}
 	input_tokens = _usage_get(usage_data, ["prompt_tokens", "input_tokens"])
@@ -784,32 +1645,48 @@ def translate_with_deepseek(model_id, prompt, chunk, temperature, max_output_tok
 	cache_hit_tokens = _usage_get(usage_data, ["prompt_cache_hit_tokens", "cache_hit_tokens"])
 	cache_miss_tokens = _usage_get(usage_data, ["prompt_cache_miss_tokens", "cache_miss_tokens"])
 
+	# Fallback cho định dạng chuẩn OpenAI (prompt_tokens_details.cached_tokens)
+	prompt_details = usage_data.get("prompt_tokens_details", {}) or {}
+	cached_tokens_details = _safe_int(prompt_details.get("cached_tokens")) if isinstance(prompt_details, dict) else 0
+	if cache_hit_tokens == 0 and cached_tokens_details > 0:
+		cache_hit_tokens = cached_tokens_details
+
+	if cache_miss_tokens == 0 and cache_hit_tokens > 0:
+		cache_miss_tokens = max(0, input_tokens - cache_hit_tokens)
+
 	choices = response_data.get("choices", []) or []
 	message = choices[0].get("message", {}) if choices else {}
 	response_text = _safe_str(message.get("content", "")).strip()
 
 	if response_text:
-		return response_text, input_tokens, output_tokens, cache_hit_tokens, cache_miss_tokens
+		return response_text, input_tokens, output_tokens, None, cache_hit_tokens, cache_miss_tokens
 
 	finish_reason = choices[0].get("finish_reason", "") if choices else ""
-
-	meta = []
-	meta.append(f"choices={len(choices)}")
+	meta = [f"choices={len(choices)}"]
 	if finish_reason:
 		meta.append(f"finish_reason={finish_reason}")
+	
+	err_msg = "DeepSeek không trả về nội dung hợp lệ (" + ", ".join(meta) + ")."
+	return None, 0, 0, err_msg, 0, 0
 
-	raise RuntimeError("DeepSeek không trả về nội dung hợp lệ (" + ", ".join(meta) + ").")
+
+
 
 
 # ================= DỊCH 1 CHUNK =================
-def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, retries=3):
+def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3):
 	global is_stopped
 
 	pause_event.wait()
 	if is_stopped:
 		return index, None
 
+	if model_fallback_order is None:
+		model_fallback_order = [model_id]
+	
 	last_error = None
+	current_model_index = 0
+	
 	for attempt in range(retries):
 		if is_stopped:
 			return index, None
@@ -817,18 +1694,30 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 		pause_event.wait()
 
 		try:
-			add_log(f"⏳ Đang dịch đoạn {index + 1}... (lần thử {attempt + 1}/{retries})")
-			translated_text, input_tokens, output_tokens, cache_hit_tokens, cache_miss_tokens = translate_with_deepseek(model_id, prompt, chunk, temperature, max_output_tokens)
-			pricing = get_model_prices_usd_per_1m(model_id)
-			if cache_hit_tokens + cache_miss_tokens == 0:
-				cache_miss_tokens = input_tokens
-
-			input_cost = (
-				(cache_hit_tokens / 1_000_000) * pricing.get("input_cache_hit_per_1m", 0.0)
-				+ (cache_miss_tokens / 1_000_000) * pricing.get("input_cache_miss_per_1m", 0.0)
-			)
-			output_cost = (output_tokens / 1_000_000) * pricing.get("output_per_1m", 0.0)
-
+			current_model = model_fallback_order[current_model_index] if current_model_index < len(model_fallback_order) else model_fallback_order[0]
+			add_log(f"⏳ Đang dịch đoạn {index + 1} (model: {current_model})... (lần thử {attempt + 1}/{retries})")
+			record_request_event(current_model)
+			translated_text, input_tokens, output_tokens, error_code, cache_hit_tokens, cache_miss_tokens = translate_with_deepseek(current_model, prompt, chunk, temperature, max_output_tokens)
+			
+			if error_code == 'QUOTA':
+				if current_model_index + 1 < len(model_fallback_order):
+					current_model_index += 1
+					next_model = model_fallback_order[current_model_index]
+					add_log(f"⚠️ Đoạn {index + 1}: Vượt quota model '{current_model}', chuyển sang '{next_model}'...")
+					time.sleep(1)
+					continue
+				else:
+					add_log(f"❌ Đoạn {index + 1}: Tất cả model đều vượt quota!")
+					last_error = "Tất cả model vượt quota"
+					time.sleep(2 + attempt * 2)
+					continue
+			
+			if error_code:
+				last_error = f"Lỗi API: {error_code}"
+				add_log(f"⚠️ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
+				time.sleep(2 + attempt * 2)
+				continue
+			
 			if not translated_text:
 				raise RuntimeError("DeepSeek trả về nội dung rỗng.")
 
@@ -839,24 +1728,31 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			stats["total_output_chars"] += len(translated_text)
 			stats["total_input_tokens"] += input_tokens
 			stats["total_output_tokens"] += output_tokens
+			pricing = get_model_prices_usd_per_1m(current_model)
+			if cache_hit_tokens + cache_miss_tokens == 0:
+				cache_miss_tokens = input_tokens
+			input_cost = (
+				(cache_hit_tokens / 1_000_000) * pricing.get("input_cache_hit_per_1m", 0.0)
+				+ (cache_miss_tokens / 1_000_000) * pricing.get("input_cache_miss_per_1m", 0.0)
+			)
+			output_cost = (output_tokens / 1_000_000) * pricing.get("output_per_1m", 0.0)
 			stats["total_input_cost_usd"] += input_cost
 			stats["total_output_cost_usd"] += output_cost
 			stats["total_cost_usd"] = stats["total_input_cost_usd"] + stats["total_output_cost_usd"]
+
+
 
 			add_log(f"✅ Hoàn thành đoạn {index + 1}")
 			return index, translated_text
 
 		except Exception as e:
-			last_error = e
-			add_log(f"⚠️ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {str(e)[:120]}")
+			last_error = str(e)
+			add_log(f"❌ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
 			time.sleep(2 + attempt * 2)
 
-	add_log(f"❌ Đoạn {index + 1} thất bại hoàn toàn sau {retries} lần thử")
-	stats["chunks_done"] += 1
-	return index, f"[ĐOẠN {index + 1} BỊ LỖI SAU {retries} LẦN THỬ: {last_error}]"
+	add_log(f"🔴 Đoạn {index + 1} thất bại sau {retries} lần thử: {last_error}")
+	return index, None
 
-
-# ================= ĐIỀU KHIỂN TẠM DỪNG =================
 def toggle_pause():
 	global is_paused
 
@@ -885,6 +1781,18 @@ def stop_translation():
 
 
 def validate_inputs():
+	if drive_upload_var.get():
+		if not ensure_drive_dependencies():
+			messagebox.showerror(
+				"Thiếu thư viện",
+				"Chưa cài thư viện Google Drive.\nCài bằng lệnh: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib",
+			)
+			return False
+		credentials_path = drive_credentials_path_var.get().strip()
+		if not credentials_path or not os.path.isfile(credentials_path):
+			messagebox.showerror("Lỗi", "Vui lòng chọn file credentials Google Drive hợp lệ.")
+			return False
+
 	api_key = api_key_entry.get().strip()
 	if not api_key:
 		messagebox.showerror("Lỗi", "Vui lòng nhập DeepSeek API Key.")
@@ -904,18 +1812,18 @@ def validate_inputs():
 
 	try:
 		chunk_size = int(chunk_size_var.get())
-		if chunk_size < 500 or chunk_size > 50000:
+		if chunk_size < 500 or chunk_size > 70000:
 			raise ValueError
 	except Exception:
-		messagebox.showerror("Lỗi", "Chunk size phải là số nguyên từ 500 đến 50000.")
+		messagebox.showerror("Lỗi", "Chunk size phải là số nguyên từ 500 đến 70000.")
 		return False
 
 	try:
 		max_output_tokens = int(max_output_tokens_var.get())
-		if max_output_tokens < 256 or max_output_tokens > 65536:
+		if max_output_tokens < 256 or max_output_tokens > 70000:
 			raise ValueError
 	except Exception:
-		messagebox.showerror("Lỗi", "Max output tokens phải là số nguyên từ 256 đến 65536.")
+		messagebox.showerror("Lỗi", "Max output tokens phải là số nguyên từ 256 đến 70000.")
 		return False
 
 	try:
@@ -927,51 +1835,6 @@ def validate_inputs():
 		return False
 
 	return True
-
-
-def refresh_models_from_api():
-	api_key = api_key_entry.get().strip()
-	if not api_key:
-		messagebox.showerror("Lỗi", "Vui lòng nhập DeepSeek API Key trước khi làm mới model.")
-		return
-
-	req = urllib.request.Request(
-		url=f"{DEEPSEEK_API_BASE}/models",
-		headers={"Authorization": f"Bearer {api_key}"},
-		method="GET",
-	)
-
-	try:
-		with urllib.request.urlopen(req, timeout=30) as resp:
-			payload = json.loads(resp.read().decode("utf-8"))
-	except urllib.error.HTTPError as e:
-		err_body = ""
-		try:
-			err_body = e.read().decode("utf-8", errors="ignore")
-		except Exception:
-			pass
-		messagebox.showerror("Lỗi API", f"Không lấy được danh sách model. HTTP {e.code}\n{err_body[:300]}")
-		return
-	except Exception as e:
-		messagebox.showerror("Lỗi", f"Không thể kết nối DeepSeek: {e}")
-		return
-
-	models = []
-	for item in payload.get("data", []) or []:
-		model_id = item.get("id")
-		if model_id:
-			models.append(model_id)
-
-	if not models:
-		messagebox.showwarning("Thông báo", "Không nhận được model nào từ API.")
-		return
-
-	models = sorted(set(models))
-	model_cb["values"] = models
-	current = model_var.get()
-	if current not in models:
-		model_var.set(models[0])
-	add_log(f"🔄 Đã làm mới danh sách model DeepSeek: {len(models)} model.")
 
 
 def normalize_scanned_glossary(raw_text):
@@ -1067,7 +1930,9 @@ def scan_story():
 	if scan_char_limit is None:
 		return
 	
+	api_key = api_key_entry.get().strip()
 	in_file = input_path.get()
+	chunk_size = int(chunk_size_var.get())
 	model_id = model_var.get()
 	temperature = float(temp_var.get())
 	
@@ -1075,8 +1940,7 @@ def scan_story():
 		try:
 			add_log(f"🔍 Đang quét thuật ngữ (tối đa {scan_char_limit:,} ký tự, có thể mất 10-60 giây)...")
 			
-			with open(in_file, "r", encoding="utf-8") as f:
-				full_text = f.read()
+			full_text = read_file_content_safely(in_file)
 
 			limited_text = full_text[:scan_char_limit]
 			scan_segments = build_scan_segments(limited_text, segment_size=12000, max_segments=12)
@@ -1103,7 +1967,7 @@ def scan_story():
 
 			for seg_idx, segment in enumerate(scan_segments, 1):
 				add_log(f"🔎 Quét đoạn mẫu {seg_idx}/{len(scan_segments)}...")
-				raw_result, _, _, _, _ = translate_with_deepseek(model_id, scan_prompt, segment, temperature, 3072)
+				raw_result, _, _, _, _, _ = translate_with_deepseek(model_id, scan_prompt, segment, temperature, 3072)
 				if not raw_result or "không có" in raw_result.lower():
 					continue
 
@@ -1160,7 +2024,8 @@ def start_translation():
 	is_paused = False
 	pause_event.set()
 
-	output_path.set(build_default_output_path(input_path.get()))
+	api_key = api_key_entry.get().strip()
+	output_path.set(build_default_output_path(input_path.get(), model_var.get()))
 	add_log(f"📄 File output mặc định: {output_path.get()}")
 
 	save_settings()
@@ -1199,9 +2064,12 @@ def process_translation_logic():
 	stats["total_input_cost_usd"] = 0.0
 	stats["total_output_cost_usd"] = 0.0
 	stats["total_cost_usd"] = 0.0
+	reset_request_metrics()
 
 	history_status = "error"
 	history_error = ""
+	drive_file_id = ""
+	drive_link = ""
 	in_file = input_path.get()
 	out_file = output_path.get()
 	model = model_var.get()
@@ -1212,6 +2080,16 @@ def process_translation_logic():
 		in_file = input_path.get()
 		out_file = output_path.get()
 		model = model_var.get()
+		model_fallback_order_str = model_fallback_order_var.get()
+		model_fallback_order = [m.strip() for m in model_fallback_order_str.split("|") if m.strip()]
+		if not model_fallback_order:
+			model_fallback_order = [model]
+		if model in model_fallback_order:
+			model_fallback_order = [m for m in model_fallback_order if m != model]
+		model_fallback_order = [model] + model_fallback_order
+		if model_fallback_order:
+			fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(model_fallback_order)}")
+			add_log(f"🔄 Model fallback order: {' -> '.join(model_fallback_order)}")
 		cp_file = get_checkpoint_path(in_file)
 		threads = int(thread_var.get())
 		chunk_size = int(chunk_size_var.get())
@@ -1224,17 +2102,24 @@ def process_translation_logic():
 		if glossary_entries:
 			add_log(f"📚 Áp dụng glossary: {len(glossary_entries)} mục thuật ngữ.")
 
-		with open(in_file, "r", encoding="utf-8") as f:
-			chunks = split_text(f.read(), size=chunk_size)
+		chunks = split_text(read_file_content_safely(in_file), size=chunk_size, split_mode=chunk_split_mode_var.get())
 
 		total = len(chunks)
 		stats["total_chunks"] = total
 		results = [None] * total
 
-		if os.path.exists(cp_file):
-			with open(cp_file, "r", encoding="utf-8") as f:
-				saved_data = json.load(f)
+		has_checkpoint = False
+		saved_data = {}
+		with checkpoint_lock:
+			if os.path.exists(cp_file):
+				try:
+					with open(cp_file, "r", encoding="utf-8") as f:
+						saved_data = json.load(f)
+					has_checkpoint = True
+				except Exception as e:
+					add_log(f"⚠️ Không thể đọc file checkpoint (file lỗi hoặc rỗng): {e}")
 
+		if has_checkpoint and saved_data:
 			if messagebox.askyesno(
 				"Khôi phục",
 				f"Tìm thấy bản dịch dở dang ({len(saved_data)}/{total} đoạn). Dịch tiếp chứ?",
@@ -1246,8 +2131,9 @@ def process_translation_logic():
 				stats["chunks_done"] = len([r for r in results if r is not None])
 				add_log(f"🔄 Đã khôi phục {stats['chunks_done']} đoạn từ file checkpoint.")
 		else:
-			with open(cp_file, "w", encoding="utf-8") as f:
-				json.dump({}, f)
+			with checkpoint_lock:
+				with open(cp_file, "w", encoding="utf-8") as f:
+					json.dump({}, f)
 
 		progress_bar["maximum"] = total
 		pending_indices = [i for i in range(total) if results[i] is None]
@@ -1268,6 +2154,7 @@ def process_translation_logic():
 					cp_file,
 					temperature,
 					max_output_tokens,
+					model_fallback_order,
 				): i
 				for i in pending_indices
 			}
@@ -1294,10 +2181,33 @@ def process_translation_logic():
 			return
 
 		with open(out_file, "w", encoding="utf-8") as f:
-			f.write("\n\n".join([r for r in results if r is not None]))
+			final_text = []
+			for idx, r in enumerate(results):
+				if r is not None:
+					final_text.append(r)
+				else:
+					fallback_warning = f"\n\n--- [LỖI DỊCH ĐOẠN {idx + 1} - DÙNG BẢN GỐC] ---\n{chunks[idx]}\n-----------------------------------------\n\n"
+					final_text.append(fallback_warning)
+			f.write("\n\n".join(final_text))
 
-		if os.path.exists(cp_file):
-			os.remove(cp_file)
+		if drive_upload_var.get():
+			try:
+				add_log("☁️ Đang upload file lên Google Drive...")
+				drive_file_id, drive_link = upload_file_to_drive(
+					out_file,
+					drive_credentials_path_var.get().strip(),
+					drive_folder_id_var.get().strip(),
+				)
+				if drive_link:
+					add_log(f"✅ Upload Google Drive thành công: {drive_link}")
+				else:
+					add_log("✅ Upload Google Drive thành công.")
+			except Exception as e:
+				add_log(f"⚠️ Upload Google Drive thất bại: {e}")
+
+		# Bỏ xóa file checkpoint để hỗ trợ dịch lại cục bộ (Partial Regenerate)
+		# if os.path.exists(cp_file):
+		# 	os.remove(cp_file)
 
 		total_time = time.time() - stats["start_time"]
 		add_log(f"🎊 HOÀN TẤT! Tổng thời gian: {format_time(total_time)}")
@@ -1309,10 +2219,14 @@ def process_translation_logic():
 		add_log(f"💰 Total Cost: ${stats['total_cost_usd']:.4f}")
 		add_log(f"💸 Tổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ")
 		history_status = "completed"
-		messagebox.showinfo(
-			"Hoàn tất",
-			f"Truyện đã được dịch xong!\nThời gian: {format_time(total_time)}\nTổng tiền: ${stats['total_cost_usd']:.4f}\nTổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ\nLưu tại: {out_file}",
+		completion_message = (
+			f"Truyện đã được dịch xong!\n"
+			f"Thời gian: {format_time(total_time)}\n"
+			f"Tổng tiền: ${stats['total_cost_usd']:.4f}\n"
+			f"Tổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ\n"
+			f"Lưu tại: {out_file}"
 		)
+		show_completion_dialog("Hoàn tất", completion_message, drive_link)
 
 	except Exception as e:
 		error_msg = str(e)
@@ -1323,6 +2237,8 @@ def process_translation_logic():
 	finally:
 		end_time = time.time()
 		duration_seconds = max(0, int(end_time - stats["start_time"])) if stats["start_time"] else 0
+		request_metrics = get_request_metrics_snapshot()
+		total_requests, peak_requests_per_minute, _ = summarize_request_counts(request_metrics)
 		history_entry = {
 			"engine": "DeepSeek",
 			"status": history_status,
@@ -1344,10 +2260,19 @@ def process_translation_logic():
 			"total_output_cost_usd": round(stats["total_output_cost_usd"], 6),
 			"total_cost_usd": round(stats["total_cost_usd"], 6),
 			"total_cost_vnd": int(round(stats["total_cost_usd"] * USD_TO_VND)),
+			"request_counts_by_minute": request_metrics,
+			"total_requests": total_requests,
+			"peak_requests_per_minute": peak_requests_per_minute,
+			"drive_file_id": drive_file_id,
+			"drive_link": drive_link,
 			"error": history_error,
 		}
 		save_translation_history_entry(history_entry)
 		refresh_history_display()
+		try:
+			refresh_request_stats_display()
+		except NameError:
+			pass
 		try:
 			refresh_cost_stats()
 		except NameError:
@@ -1358,6 +2283,144 @@ def process_translation_logic():
 		btn_stop.config(state="disabled")
 		status_var.set("Sẵn sàng")
 		is_stopped = True
+
+
+
+
+
+# ================= 2. DIFF VIEWER - SO SÁNH FILE =================
+def show_diff_window(original_text: str, translated_text: str, input_file: str, output_file: str):
+	"""Mở cửa sổ so sánh gốc và dịch side-by-side."""
+	diff_win = tk.Toplevel(root)
+	diff_win.title("🔄 Diff Viewer - So sánh gốc vs dịch")
+	diff_win.geometry("1200x700")
+	diff_win.configure(bg=PALETTE["bg"])
+	
+	toolbar = tk.Frame(diff_win, bg=PALETTE["panel"])
+	toolbar.pack(fill="x", padx=10, pady=10)
+	
+	file_info = f"Gốc: {os.path.basename(input_file)} | Dịch: {os.path.basename(output_file)}"
+	tk.Label(toolbar, text=file_info, bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 9)).pack(anchor="w")
+	
+	main_frame = tk.Frame(diff_win, bg=PALETTE["bg"])
+	main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+	main_frame.columnconfigure(0, weight=1)
+	main_frame.columnconfigure(1, weight=1)
+	
+	# Cột trái: Gốc
+	left_label = tk.Label(main_frame, text="📄 Bản gốc (Trung)", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold"))
+	left_label.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+	
+	left_text = scrolledtext.ScrolledText(main_frame, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word", height=25)
+	left_text.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
+	left_text.insert(tk.END, original_text)
+	left_text.config(state="disabled")
+	
+	# Cột phải: Dịch
+	right_label = tk.Label(main_frame, text="📝 Bản dịch (Việt)", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold"))
+	right_label.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+	
+	right_text = scrolledtext.ScrolledText(main_frame, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word", height=25)
+	right_text.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
+	right_text.insert(tk.END, translated_text)
+	right_text.config(state="disabled")
+	
+	# Đồng bộ scroll
+	def sync_scroll_y(event=None):
+		left_text.yview_moveto(right_text.yview()[0])
+	
+	def sync_scroll_x(event=None):
+		left_text.xview_moveto(right_text.xview()[0])
+	
+	right_text.bind("<MouseWheel>", sync_scroll_y)
+	right_text.bind("<Button-4>", sync_scroll_y)
+	right_text.bind("<Button-5>", sync_scroll_y)
+	
+	main_frame.rowconfigure(1, weight=1)
+	
+	# Nút đóng
+	close_btn = tk.Button(diff_win, text="Đóng", bg=PALETTE["accent"], fg="#0b0f19", bd=0, padx=15, pady=8, command=diff_win.destroy)
+	close_btn.pack(pady=10)
+	
+	diff_win.transient(root)
+	diff_win.grab_set()
+
+
+# ================= 3. CLIPBOARD - PASTE FROM CLIPBOARD =================
+def paste_from_clipboard():
+	"""Lấy text từ clipboard và hiển thị."""
+	try:
+		clipboard_text = root.clipboard_get()
+		quick_input_text.config(state="normal")
+		quick_input_text.delete("1.0", tk.END)
+		quick_input_text.insert(tk.END, clipboard_text)
+		quick_input_text.config(state="normal")
+		quick_status_var.set(f"✅ Đã paste: {len(clipboard_text)} ký tự")
+	except Exception as e:
+		messagebox.showerror("Lỗi", f"Không thể lấy từ clipboard: {e}")
+
+def copy_to_clipboard():
+	"""Copy kết quả dịch vào clipboard."""
+	output_text = quick_output_text.get("1.0", tk.END).strip()
+	if not output_text:
+		messagebox.showwarning("Cảnh báo", "Chưa có kết quả dịch để copy!")
+		return
+	
+	try:
+		root.clipboard_clear()
+		root.clipboard_append(output_text)
+		quick_status_var.set("✅ Đã copy kết quả vào clipboard!")
+	except Exception as e:
+		messagebox.showerror("Lỗi", f"Không thể copy: {e}")
+
+def translate_clipboard_text():
+	"""Dịch text từ clipboard (1 chunk đơn lẻ, không queue)."""
+	api_key = api_key_entry.get().strip()
+	if not api_key:
+		messagebox.showerror("Lỗi", "Vui lòng nhập API Key")
+		return
+	
+	input_text = quick_input_text.get("1.0", tk.END).strip()
+	if not input_text:
+		messagebox.showwarning("Cảnh báo", "Vui lòng paste text vào trước!")
+		return
+	
+	quick_status_var.set("⏳ Đang dịch...")
+	
+	def _worker():
+		try:
+			model_id = quick_model_var.get()
+			temperature = float(temp_var.get())
+			max_tokens = int(max_output_tokens_var.get())
+			prompt = prompt_text.get("1.0", tk.END).strip()
+			glossary_raw = glossary_text.get("1.0", tk.END).strip()
+			glossary_entries = parse_glossary(glossary_raw)
+			final_prompt = build_prompt_with_glossary(prompt, glossary_entries)
+			
+			result, input_tokens, output_tokens, error_code, _, _ = translate_with_deepseek(
+				model_id, final_prompt, input_text, temperature, max_tokens
+			)
+			
+			if error_code:
+				result = f"[LỖI: {error_code}]"
+			
+			def _update_ui():
+				quick_output_text.config(state="normal")
+				quick_output_text.delete("1.0", tk.END)
+				quick_output_text.insert(tk.END, result or "")
+				quick_output_text.config(state="normal")
+				
+				quick_status_var.set(
+					f"✅ Dịch xong! Input: {input_tokens:,} | Output: {output_tokens:,}"
+				)
+			
+			root.after(0, _update_ui)
+		except Exception as e:
+			def _show_error():
+				quick_status_var.set(f"❌ Lỗi: {str(e)[:80]}")
+			root.after(0, _show_error)
+	
+	threading.Thread(target=_worker, daemon=True).start()
 
 
 # ================= GUI (Giao diện) =================
@@ -1505,7 +2568,7 @@ badge_row = tk.Frame(header, bg=PALETTE["bg"])
 badge_row.pack(anchor="w", pady=(4, 0))
 for text, color in [
 	("DeepSeek API", PALETTE["accent"]),
-	("V4 Flash + V4 Pro", PALETTE["accent_alt"]),
+	("Flash + Pro Models", PALETTE["accent_alt"]),
 ]:
 	tk.Label(
 		badge_row,
@@ -1549,18 +2612,34 @@ main_frame.rowconfigure(1, weight=1)
 
 translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 preview_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+quick_translate_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+diff_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 history_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+requests_tab = tk.Frame(tabs, bg=PALETTE["bg"])
 stats_tab = tk.Frame(tabs, bg=PALETTE["bg"])
+
 tabs.add(translate_tab, text="🚀 Dịch truyện")
 tabs.add(preview_tab, text="🔍 Xem Chunk")
+tabs.add(quick_translate_tab, text="📋 Dịch nhanh")
+tabs.add(diff_tab, text="🔄 Diff Viewer")
 tabs.add(history_tab, text="🗂️ Lịch sử dịch")
+tabs.add(requests_tab, text="📈 Request/phút")
 tabs.add(stats_tab, text="💰 Thống kê chi phí")
 
 for col in range(2):
 	translate_tab.columnconfigure(col, weight=1)
 
+quick_translate_tab.columnconfigure(0, weight=1)
+quick_translate_tab.rowconfigure(1, weight=1)
+quick_translate_tab.rowconfigure(2, weight=1)
+
+diff_tab.columnconfigure(0, weight=1)
+diff_tab.rowconfigure(1, weight=1)
+
 history_tab.columnconfigure(0, weight=1)
 history_tab.rowconfigure(1, weight=1)
+requests_tab.columnconfigure(0, weight=1)
+requests_tab.rowconfigure(1, weight=1)
 
 # ================= THỐNG KÊ CHI PHÍ TAB =================
 stats_tab.columnconfigure(0, weight=1)
@@ -1722,10 +2801,12 @@ preview_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6), pa
 preview_info_var = tk.StringVar(value="Tổng số chunk: 0")
 
 previewed_chunks = []
+translated_preview_chunks = {}
 
 def load_and_preview_chunks():
-	global previewed_chunks
+	global previewed_chunks, translated_preview_chunks
 	
+	translated_preview_chunks = {}
 	try:
 		input_file = input_path.get()
 	except NameError:
@@ -1742,9 +2823,8 @@ def load_and_preview_chunks():
 		size_limit = CHUNK_SIZE
 		
 	try:
-		with open(input_file, "r", encoding="utf-8") as f:
-			text = f.read()
-		previewed_chunks = split_text(text, size_limit)
+		text = read_file_content_safely(input_file)
+		previewed_chunks = split_text(text, size_limit, split_mode=chunk_split_mode_var.get())
 		
 		chunk_listbox.delete(0, tk.END)
 		for i, chunk in enumerate(previewed_chunks):
@@ -1752,10 +2832,25 @@ def load_and_preview_chunks():
 			first_line = lines[0][:35] + "..." if len(lines[0]) > 35 else lines[0]
 			chunk_listbox.insert(tk.END, f"Chunk {i+1} ({len(chunk)} ký tự) - {first_line}")
 		
+		# Load translated chunks if exist
+		cp_file = get_checkpoint_path(input_file)
+		with checkpoint_lock:
+			if os.path.exists(cp_file):
+				try:
+					with open(cp_file, "r", encoding="utf-8") as f:
+						saved_data = json.load(f)
+						for k, v in saved_data.items():
+							translated_preview_chunks[int(k)] = v
+				except Exception as e:
+					pass
+
 		preview_info_var.set(f"Tổng số chunk: {len(previewed_chunks)}")
 		chunk_content_text.config(state="normal")
 		chunk_content_text.delete("1.0", tk.END)
 		chunk_content_text.config(state="disabled")
+		chunk_translated_text.config(state="normal")
+		chunk_translated_text.delete("1.0", tk.END)
+		chunk_translated_text.config(state="disabled")
 	except Exception as e:
 		messagebox.showerror("Lỗi", f"Không thể chia chunk: {str(e)}")
 
@@ -1770,6 +2865,20 @@ tk.Button(
 	pady=5,
 	command=load_and_preview_chunks
 ).pack(side="left", padx=5, pady=5)
+
+regenerate_chunk_btn = tk.Button(
+	preview_toolbar,
+	text="✨ Dịch lại đoạn này",
+	font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["warn"],
+	fg="#0b0f19",
+	bd=0,
+	padx=10,
+	pady=5,
+	command=lambda: open_regenerate_dialog(),
+	state="disabled"
+)
+regenerate_chunk_btn.pack(side="left", padx=5, pady=5)
 
 tk.Label(
 	preview_toolbar, 
@@ -1802,8 +2911,11 @@ chunk_listbox.configure(yscrollcommand=chunk_list_scroll.set)
 chunk_content_frame = tk.Frame(preview_tab, bg=PALETTE["panel"])
 chunk_content_frame.grid(row=1, column=1, sticky="nsew", padx=(3, 6), pady=6)
 
+chunk_content_paned = tk.PanedWindow(chunk_content_frame, orient=tk.VERTICAL, bg=PALETTE["panel"], bd=0, sashwidth=4)
+chunk_content_paned.pack(fill="both", expand=True, padx=5, pady=5)
+
 chunk_content_text = scrolledtext.ScrolledText(
-	chunk_content_frame, 
+	chunk_content_paned, 
 	bg=PALETTE["input_bg"], 
 	fg=PALETTE["text"], 
 	wrap="word",
@@ -1812,8 +2924,21 @@ chunk_content_text = scrolledtext.ScrolledText(
 	highlightthickness=1,
 	highlightbackground=PALETTE["border"]
 )
-chunk_content_text.pack(fill="both", expand=True, padx=5, pady=5)
 chunk_content_text.config(state="disabled")
+chunk_content_paned.add(chunk_content_text, minsize=100)
+
+chunk_translated_text = scrolledtext.ScrolledText(
+	chunk_content_paned, 
+	bg=PALETTE["input_bg"], 
+	fg=PALETTE.get("text_accent", PALETTE["text"]), 
+	wrap="word",
+	font=("Consolas", 10),
+	relief="flat",
+	highlightthickness=1,
+	highlightbackground=PALETTE["border"]
+)
+chunk_translated_text.config(state="disabled")
+chunk_content_paned.add(chunk_translated_text, minsize=100)
 
 def on_chunk_select(event):
 	selection = chunk_listbox.curselection()
@@ -1821,20 +2946,333 @@ def on_chunk_select(event):
 		index = selection[0]
 		chunk_content_text.config(state="normal")
 		chunk_content_text.delete("1.0", tk.END)
-		chunk_content_text.insert(tk.END, previewed_chunks[index])
+		chunk_content_text.insert(tk.END, "--- BẢN GỐC ---\n" + previewed_chunks[index])
 		chunk_content_text.config(state="disabled")
 		
+		chunk_translated_text.config(state="normal")
+		chunk_translated_text.delete("1.0", tk.END)
+		if index in translated_preview_chunks:
+			chunk_translated_text.insert(tk.END, "--- BẢN DỊCH ---\n" + translated_preview_chunks[index])
+		else:
+			chunk_translated_text.insert(tk.END, "--- CHƯA DỊCH ---")
+		chunk_translated_text.config(state="disabled")
+		
+		regenerate_chunk_btn.config(state="normal")
+		
 chunk_listbox.bind('<<ListboxSelect>>', on_chunk_select)
+
+def open_regenerate_dialog():
+	selection = chunk_listbox.curselection()
+	if not selection:
+		return
+	index = selection[0]
+	chunk_text = previewed_chunks[index]
+	
+	dialog = tk.Toplevel(root)
+	dialog.title(f"Dịch lại cục bộ - Chunk {index+1}")
+	dialog.geometry("800x650")
+	dialog.configure(bg=PALETTE["bg"])
+	dialog.transient(root)
+	dialog.grab_set()
+	
+	tk.Label(dialog, text="Bản gốc:", bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", padx=10, pady=(10, 0))
+	orig_text = scrolledtext.ScrolledText(dialog, height=8, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word")
+	orig_text.pack(fill="x", padx=10, pady=5)
+	orig_text.insert(tk.END, chunk_text)
+	orig_text.config(state="disabled")
+	
+	tk.Label(dialog, text="Tùy chỉnh Prompt (Ví dụ: Đổi xưng hô thành huynh-đệ):", bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", padx=10, pady=(10, 0))
+	prompt_entry = tk.Entry(dialog, bg=PALETTE["input_bg"], fg=PALETTE["text"], font=("Segoe UI", 10))
+	prompt_entry.pack(fill="x", padx=10, pady=5)
+	
+	tk.Label(dialog, text="Bản dịch hiện tại (Có thể sửa tay rồi lưu luôn):", bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", padx=10, pady=(10, 0))
+	trans_text = scrolledtext.ScrolledText(dialog, height=10, bg=PALETTE["input_bg"], fg=PALETTE["text"], wrap="word")
+	trans_text.pack(fill="both", expand=True, padx=10, pady=5)
+	if index in translated_preview_chunks:
+		trans_text.insert(tk.END, translated_preview_chunks[index])
+		
+	def do_regenerate():
+		custom_prompt = prompt_entry.get().strip()
+		base_prompt = prompt_text.get("1.0", tk.END).strip()
+		glossary_raw = glossary_text.get("1.0", tk.END).strip()
+		glossary_entries = parse_glossary(glossary_raw)
+		full_prompt = build_prompt_with_glossary(base_prompt, glossary_entries)
+		
+		if custom_prompt:
+			full_prompt = f"Yêu cầu đặc biệt cho đoạn này: {custom_prompt}\n\n{full_prompt}"
+			
+		model = model_var.get()
+		temperature = float(temp_var.get())
+		max_tokens = int(max_output_tokens_var.get())
+		api_key = api_key_entry.get().strip()
+		
+		trans_text.config(state="disabled")
+		trans_text.delete("1.0", tk.END)
+		trans_text.insert(tk.END, "Đang dịch lại bằng AI...")
+		
+		def run():
+			try:
+				_, result = translate_chunk(model, full_prompt, chunk_text, index, get_checkpoint_path(input_path.get()), temperature, max_tokens)
+				
+				dialog.after(0, lambda: [
+					trans_text.config(state="normal"),
+					trans_text.delete("1.0", tk.END),
+					trans_text.insert(tk.END, result if result else "LỖI DỊCH THUẬT (Kết quả rỗng)"),
+				])
+			except Exception as e:
+				dialog.after(0, lambda: [
+					trans_text.config(state="normal"),
+					trans_text.delete("1.0", tk.END),
+					trans_text.insert(tk.END, f"LỖI: {e}"),
+				])
+				
+		threading.Thread(target=run, daemon=True).start()
+		
+	def save_and_close():
+		new_trans = trans_text.get("1.0", tk.END).strip()
+		if not new_trans:
+			messagebox.showwarning("Cảnh báo", "Bản dịch đang trống!")
+			return
+			
+		translated_preview_chunks[index] = new_trans
+		
+		cp_file = get_checkpoint_path(input_path.get())
+		with checkpoint_lock:
+			saved_data = {}
+			if os.path.exists(cp_file):
+				try:
+					with open(cp_file, "r", encoding="utf-8") as f:
+						saved_data = json.load(f)
+				except:
+					pass
+				
+			saved_data[str(index)] = new_trans
+			with open(cp_file, "w", encoding="utf-8") as f:
+				json.dump(saved_data, f, ensure_ascii=False, indent=2)
+			
+		on_chunk_select(None)
+		dialog.destroy()
+		messagebox.showinfo("Thành công", f"Đã cập nhật bản dịch mới cho Chunk {index+1} vào checkpoint.")
+		
+	btn_frame = tk.Frame(dialog, bg=PALETTE["bg"])
+	btn_frame.pack(fill="x", padx=10, pady=10)
+	
+	tk.Button(btn_frame, text="✨ Dịch lại bằng AI", bg=PALETTE["accent"], fg="#0b0f19", font=("Segoe UI", 10, "bold"), command=do_regenerate).pack(side="left", padx=5)
+	tk.Button(btn_frame, text="💾 Lưu và Đóng", bg=PALETTE["ok"], fg="#0b0f19", font=("Segoe UI", 10, "bold"), command=save_and_close).pack(side="right", padx=5)
+
+
+# ================= QUICK TRANSLATE TAB (CLIPBOARD) =================
+quick_status_var = tk.StringVar(value="Sẵn sàng paste text từ clipboard")
+quick_model_var = tk.StringVar(value=MODELS[0])
+
+quick_input_toolbar = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_input_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
+quick_input_toolbar.columnconfigure(1, weight=1)
+
+tk.Label(quick_input_toolbar, text="📋 Paste từ Clipboard:", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+quick_model_frame = tk.Frame(quick_input_toolbar, bg=PALETTE["panel"])
+quick_model_frame.grid(row=0, column=1, sticky="w", padx=(15, 8))
+
+tk.Label(
+	quick_model_frame,
+	text="Model dịch nhanh:",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold")
+).pack(side="left", padx=(0, 6))
+
+quick_model_cb = ttk.Combobox(
+	quick_model_frame,
+	values=MODELS,
+	textvariable=quick_model_var,
+	state="readonly",
+	width=30
+)
+quick_model_cb.pack(side="left")
+
+tk.Button(
+	quick_input_toolbar, text="📥 Paste from Clipboard", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=paste_from_clipboard
+).grid(row=0, column=2, padx=(8, 4), pady=8)
+
+tk.Button(
+	quick_input_toolbar, text="🗑️ Clear", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["warn"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=lambda: (quick_input_text.config(state="normal"), quick_input_text.delete("1.0", tk.END), quick_input_text.config(state="normal"))
+).grid(row=0, column=3, padx=4, pady=8)
+
+quick_input_frame = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_input_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+
+tk.Label(quick_input_frame, text="📝 Nội dung gốc (Trung):", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+
+quick_input_text = scrolledtext.ScrolledText(
+	quick_input_frame, height=10, bg=PALETTE["input_bg"], fg=PALETTE["text"],
+	wrap="word", relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"]
+)
+quick_input_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+# Output area
+quick_output_toolbar = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_output_toolbar.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 6))
+quick_output_toolbar.columnconfigure(0, weight=1)
+
+tk.Label(quick_output_toolbar, textvariable=quick_status_var, bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 9, "italic")).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+translate_quick_btn = tk.Button(
+	quick_output_toolbar, text="🚀 DỊCH NGAY", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=translate_clipboard_text
+)
+translate_quick_btn.grid(row=0, column=1, padx=(8, 4), pady=8)
+
+tk.Button(
+	quick_output_toolbar, text="📋 Copy to Clipboard", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["ok"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=copy_to_clipboard
+).grid(row=0, column=2, padx=4, pady=8)
+
+quick_output_frame = tk.Frame(quick_translate_tab, bg=PALETTE["panel"])
+quick_output_frame.grid(row=3, column=0, sticky="nsew", padx=6, pady=(0, 6))
+quick_translate_tab.rowconfigure(3, weight=1)
+
+tk.Label(quick_output_frame, text="✨ Kết quả dịch (Việt):", bg=PALETTE["panel"], fg=PALETTE["text_muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+
+quick_output_text = scrolledtext.ScrolledText(
+	quick_output_frame, height=10, bg=PALETTE["input_bg"], fg=PALETTE["text"],
+	wrap="word", relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"]
+)
+quick_output_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+quick_output_text.config(state="disabled")
+
+
+# ================= DIFF VIEWER TAB =================
+diff_toolbar = tk.Frame(diff_tab, bg=PALETTE["panel"])
+diff_toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
+diff_toolbar.columnconfigure(1, weight=1)
+
+tk.Label(
+	diff_toolbar, text="So sánh file gốc vs dịch side-by-side:",
+	bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold")
+).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+
+diff_file_var = tk.StringVar()
+
+def open_diff_viewer():
+	input_file = input_path.get()
+	output_file = output_path.get()
+	
+	if not input_file or not os.path.exists(input_file):
+		messagebox.showerror("Lỗi", "Chọn file input hợp lệ trước")
+		return
+	
+	if not output_file or not os.path.exists(output_file):
+		messagebox.showerror("Lỗi", "Chọn file output hợp lệ trước")
+		return
+	
+	try:
+		original = read_file_content_safely(input_file)
+		translated = read_file_content_safely(output_file)
+		
+		show_diff_window(original, translated, input_file, output_file)
+	except Exception as e:
+		messagebox.showerror("Lỗi", f"Không thể mở file: {e}")
+
+tk.Button(
+	diff_toolbar, text="📂 Chọn file gốc", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=lambda: input_path.set(filedialog.askopenfilename(filetypes=[("Text files", "*.txt")]))
+).grid(row=0, column=2, padx=(8, 4), pady=8)
+
+tk.Button(
+	diff_toolbar, text="📂 Chọn file dịch", font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=12, pady=6,
+	command=lambda: output_path.set(filedialog.askopenfilename(filetypes=[("Text files", "*.txt")]))
+).grid(row=0, column=3, padx=(0, 4), pady=8)
+
+tk.Button(
+	diff_toolbar, text="🔄 Mở Diff Viewer", font=("Segoe UI", 10, "bold"),
+	bg=PALETTE["accent"], fg="#0b0f19", bd=0, padx=15, pady=8,
+	command=open_diff_viewer
+).grid(row=0, column=4, padx=(0, 8), pady=8)
+
+diff_info_frame = tk.Frame(diff_tab, bg=PALETTE["panel"])
+diff_info_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
+diff_info_frame.columnconfigure(0, weight=1)
+diff_info_frame.rowconfigure(0, weight=1)
+
+diff_info_text = scrolledtext.ScrolledText(
+	diff_info_frame, height=30, bg=PALETTE["input_bg"], fg=PALETTE["text"],
+	wrap="word", relief="flat", highlightthickness=1, highlightbackground=PALETTE["border"]
+)
+diff_info_text.pack(fill="both", expand=True, padx=8, pady=8)
+diff_info_text.insert(tk.END, 
+	"🔄 DIFF VIEWER - SO SÁNH GỐC VỨ DỊCH\n\n"
+	"Tính năng này cho phép bạn xem side-by-side (cạnh nhau) bản gốc và bản dịch.\n\n"
+	"Cách dùng:\n"
+	"1. Chọn file gốc (input) bên trên\n"
+	"2. Chọn file dịch (output) bên trên\n"
+	"3. Nhấn 'Mở Diff Viewer'\n"
+	"4. Một cửa sổ mới sẽ hiện ra với 2 cột:\n"
+	"   - Trái: Bản gốc (tiếng Trung)\n"
+	"   - Phải: Bản dịch (tiếng Việt)\n\n"
+	"Lợi ích:\n"
+	"✅ Review nhanh chóng\n"
+	"✅ So sánh độ dài output\n"
+	"✅ Kiểm tra tính tự nhiên của dịch\n"
+	"✅ Phát hiện lỗi dịch dễ dàng\n\n"
+	"💡 Tips: Scroll cả 2 cột sẽ đồng bộ với nhau!"
+)
+diff_info_text.config(state="disabled")
+
+
+
 
 
 input_path = tk.StringVar()
 output_path = tk.StringVar()
 model_var = tk.StringVar(value=MODELS[0])
+thinking_level_var = tk.StringVar(value="disabled")
+model_fallback_order_var = tk.StringVar(value="|".join(MODELS))  # Model order for fallback when quota exceeded
+fallback_order_hint_var = tk.StringVar(value="Thứ tự fallback hiệu lực: --")
 thread_var = tk.StringVar(value="3")
 chunk_size_var = tk.StringVar(value=str(CHUNK_SIZE))
+chunk_split_mode_var = tk.StringVar(value="keyword")
 max_output_tokens_var = tk.StringVar(value=str(MAX_OUTPUT_TOKENS))
 scan_char_limit_var = tk.StringVar(value=str(DEFAULT_SCAN_CHAR_LIMIT))
 temp_var = tk.StringVar(value="0.5")
+drive_upload_var = tk.BooleanVar(value=False)
+drive_credentials_path_var = tk.StringVar()
+drive_folder_id_var = tk.StringVar()
+current_key_name_var = tk.StringVar(value="Mặc định")
+current_prompt_name_var = tk.StringVar(value="Mặc định")
+
+def get_effective_fallback_order():
+	model = model_var.get().strip()
+	order = [m.strip() for m in model_fallback_order_var.get().split("|") if m.strip()]
+	if not order:
+		return [model] if model else []
+	if model:
+		order = [m for m in order if m != model]
+		order = [model] + order
+	return order
+
+def update_fallback_hint(*args):
+	order = get_effective_fallback_order()
+	if order:
+		fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(order)}")
+	else:
+		fallback_order_hint_var.set("Thứ tự fallback hiệu lực: --")
+
+
+def update_thinking_level_state(*args):
+	model_name = model_var.get()
+	if is_deepseek_thinking_supported(model_name):
+		thinking_level_cb.config(state="readonly")
+	else:
+		thinking_level_cb.config(state="disabled")
 
 entry_opts = {
 	"bg": PALETTE["input_bg"],
@@ -1845,21 +3283,139 @@ entry_opts = {
 	"highlightbackground": PALETTE["border"],
 }
 
+
+
 card_api = build_card(translate_tab, "🔐 DeepSeek API Key", 0, 1, colspan=2)
 tk.Label(
 	card_api,
-	text="Dùng DeepSeek API Key. Key được mã hóa và chỉ dùng trên máy này.",
+	text="Dùng DeepSeek API Key từ DeepSeek Platform. Key được mã hóa và chỉ dùng trên máy này.",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9),
 ).grid(row=1, column=0, sticky="w", pady=(0, 6))
 
+api_key_select_frame = tk.Frame(card_api, bg=PALETTE["panel"])
+api_key_select_frame.grid(row=2, column=0, sticky="ew", pady=(0, 6))
+
+tk.Label(
+	api_key_select_frame,
+	text="Chọn API Key:",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	font=("Segoe UI", 9, "bold"),
+).pack(side="left", padx=(0, 6))
+
+api_key_cb = ttk.Combobox(
+	api_key_select_frame,
+	values=[],
+	textvariable=current_key_name_var,
+	state="readonly",
+	width=25,
+)
+api_key_cb.pack(side="left", padx=4)
+api_key_cb.bind("<<ComboboxSelected>>", on_api_key_select)
+
+tk.Button(
+	api_key_select_frame,
+	text="Đổi tên",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=rename_api_key,
+).pack(side="left", padx=4)
+
+tk.Button(
+	api_key_select_frame,
+	text="Thêm mới",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=add_new_api_key,
+).pack(side="left", padx=4)
+
+tk.Button(
+	api_key_select_frame,
+	text="Xóa",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["warn"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=delete_api_key,
+).pack(side="left", padx=4)
+
 api_key_frame = tk.Frame(card_api, bg=PALETTE["panel"])
-api_key_frame.grid(row=2, column=0, sticky="ew")
+api_key_frame.grid(row=3, column=0, sticky="ew")
 api_key_frame.columnconfigure(0, weight=1)
 
 api_key_entry = tk.Entry(api_key_frame, show="*", width=70, **entry_opts)
 api_key_entry.grid(row=0, column=0, sticky="ew")
+
+def open_model_fallback_dialog():
+	dialog = tk.Toplevel(root)
+	dialog.title("Cấu hình Model Fallback")
+	dialog.geometry("400x350")
+	dialog.resizable(False, False)
+	dialog.configure(bg=PALETTE["bg"])
+	
+	tk.Label(dialog, text="Sắp xếp thứ tự model khi vượt quota:", bg=PALETTE["bg"], fg=PALETTE["text"], font=("Segoe UI", 10)).pack(padx=10, pady=10)
+	
+	frame = tk.Frame(dialog, bg=PALETTE["panel"], bd=1, relief="solid")
+	frame.pack(padx=10, pady=(0, 10), fill="both", expand=True)
+	
+	current_order = [m.strip() for m in model_fallback_order_var.get().split("|") if m.strip()]
+	if not current_order:
+		current_order = MODELS
+	
+	listbox = tk.Listbox(frame, bg=PALETTE["input_bg"], fg=PALETTE["text"], selectbackground=PALETTE["accent_alt"], font=("Segoe UI", 10), activestyle="none", bd=0, highlightthickness=0)
+	for model in current_order:
+		listbox.insert(tk.END, model)
+	listbox.pack(fill="both", expand=True, padx=5, pady=5)
+	
+	btn_frame = tk.Frame(dialog, bg=PALETTE["bg"])
+	btn_frame.pack(padx=10, pady=(0, 10), fill="x")
+	
+	def move_up():
+		sel = listbox.curselection()
+		if sel and sel[0] > 0:
+			idx = sel[0]
+			items = list(listbox.get(0, tk.END))
+			items[idx], items[idx-1] = items[idx-1], items[idx]
+			listbox.delete(0, tk.END)
+			listbox.insert(0, *items)
+			listbox.selection_set(idx-1)
+	
+	def move_down():
+		sel = listbox.curselection()
+		if sel and sel[0] < listbox.size() - 1:
+			idx = sel[0]
+			items = list(listbox.get(0, tk.END))
+			items[idx], items[idx+1] = items[idx+1], items[idx]
+			listbox.delete(0, tk.END)
+			listbox.insert(0, *items)
+			listbox.selection_set(idx+1)
+	
+	def save_order():
+		items = list(listbox.get(0, tk.END))
+		model_fallback_order_var.set("|".join(items))
+		add_log(f"Fallback order: {' -> '.join(items)}")
+		update_fallback_hint()
+		dialog.destroy()
+	
+	tk.Button(btn_frame, text="Up", bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=6, command=move_up).pack(side="left", padx=2)
+	tk.Button(btn_frame, text="Down", bg=PALETTE["accent_alt"], fg="#0b0f19", bd=0, padx=10, pady=6, command=move_down).pack(side="left", padx=2)
+	tk.Button(btn_frame, text="Save", bg=PALETTE["ok"], fg="#0b0f19", bd=0, padx=10, pady=6, command=save_order).pack(side="right", padx=2)
+	tk.Button(btn_frame, text="Cancel", bg=PALETTE["warn"], fg="#0b0f19", bd=0, padx=10, pady=6, command=dialog.destroy).pack(side="right", padx=2)
+	
+	dialog.transient(root)
+	dialog.grab_set()
 
 def toggle_api_key_visibility():
 	if api_key_entry.cget('show') == '*':
@@ -1884,11 +3440,11 @@ btn_toggle_api.grid(row=0, column=1, padx=(6, 0))
 
 tk.Label(
 	card_api,
-	text="Lấy key tại: https://platform.deepseek.com/api_keys",
+	text="Lấy key tại: platform.deepseek.com › API Keys.",
 	bg=PALETTE["panel"],
 	fg=PALETTE["accent_alt"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=3, column=0, sticky="w", pady=(4, 0))
+).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
 card_files = build_card(translate_tab, "📂 Chọn file nguồn / đích", 0, 2)
 tk.Label(
@@ -1917,11 +3473,66 @@ tk.Button(
 
 tk.Label(
 	card_files,
-	text="Output sẽ tự động lưu cạnh file input theo mẫu: Dich_tên_file_số_ngẫu_nhiên.txt",
+	text="Output sẽ tự động lưu cạnh file input theo mẫu: Dich_tên_file_model_yyyy-mm-dd_số_ngẫu_nhiên.txt",
 	bg=PALETTE["panel"],
+	
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9),
 ).grid(row=3, column=0, sticky="w", pady=(6, 0))
+
+tk.Label(
+	card_files,
+	text="Google Drive (tùy chọn)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=4, column=0, sticky="w", pady=(10, 2))
+
+tk.Checkbutton(
+	card_files,
+	text="Tự động upload lên Google Drive sau khi dịch xong",
+	variable=drive_upload_var,
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	selectcolor=PALETTE["panel"],
+	activebackground=PALETTE["panel"],
+	activeforeground=PALETTE["text"],
+).grid(row=5, column=0, sticky="w")
+
+tk.Label(
+	card_files,
+	text="Credentials OAuth (.json)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9),
+).grid(row=6, column=0, sticky="w", pady=(6, 2))
+
+drive_cred_frame = tk.Frame(card_files, bg=PALETTE["panel"])
+drive_cred_frame.grid(row=7, column=0, sticky="ew", pady=(0, 6))
+drive_cred_frame.columnconfigure(0, weight=1)
+tk.Entry(drive_cred_frame, textvariable=drive_credentials_path_var, **entry_opts).grid(row=0, column=0, sticky="ew")
+tk.Button(
+	drive_cred_frame,
+	text="Chọn file",
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=10,
+	pady=6,
+	command=lambda: drive_credentials_path_var.set(
+		filedialog.askopenfilename(filetypes=[("Google OAuth", "*.json")])
+	),
+).grid(row=0, column=1, padx=(8, 0))
+
+tk.Label(
+	card_files,
+	text="Folder ID (tùy chọn)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9),
+).grid(row=8, column=0, sticky="w", pady=(4, 2))
+
+tk.Entry(card_files, textvariable=drive_folder_id_var, **entry_opts).grid(row=9, column=0, sticky="ew")
 
 card_config = build_card(translate_tab, "⚙️ Cấu hình dịch", 1, 2)
 tk.Label(
@@ -1931,22 +3542,53 @@ tk.Label(
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
 ).grid(row=1, column=0, sticky="w")
-model_cb = ttk.Combobox(card_config, values=MODELS, textvariable=model_var, state="readonly")
-model_cb.grid(row=2, column=0, sticky="ew", pady=(2, 8))
+model_frame = tk.Frame(card_config, bg=PALETTE["panel"])
+model_frame.grid(row=2, column=0, sticky="ew", pady=(2, 8))
+model_frame.columnconfigure(0, weight=1)
+model_cb = ttk.Combobox(model_frame, values=MODELS, textvariable=model_var, state="readonly")
+model_cb.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+model_cb.bind("<<ComboboxSelected>>", lambda e: [update_fallback_hint(), update_thinking_level_state()])
+model_var.trace_add("write", lambda *args: [update_fallback_hint(), update_thinking_level_state()])
+model_fallback_order_var.trace_add("write", update_fallback_hint)
+
 tk.Button(
-	card_config,
-	text="🔄 Làm mới model từ API",
+	model_frame,
+	text="🔧 Fallback",
 	font=("Segoe UI", 8, "bold"),
 	bg=PALETTE["accent_alt"],
 	fg="#0b0f19",
 	bd=0,
 	padx=8,
-	pady=4,
-	command=refresh_models_from_api,
-).grid(row=2, column=1, sticky="e", padx=(8, 0))
+	pady=6,
+	command=lambda: open_model_fallback_dialog(),
+).grid(row=0, column=1, sticky="ew")
+
+tk.Label(
+	card_config,
+	textvariable=fallback_order_hint_var,
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 8, "italic"),
+).grid(row=3, column=0, sticky="w", pady=(0, 6))
+
+tk.Label(
+	card_config,
+	text="Thinking Mode (chỉ áp dụng cho model DeepSeek hỗ trợ suy nghĩ)",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=4, column=0, sticky="w")
+
+thinking_level_cb = ttk.Combobox(
+	card_config,
+	values=["disabled", "high", "max"],
+	textvariable=thinking_level_var,
+	state="readonly"
+)
+thinking_level_cb.grid(row=5, column=0, sticky="ew", pady=(2, 8))
 
 perf_frame = tk.Frame(card_config, bg=PALETTE["panel"])
-perf_frame.grid(row=3, column=0, sticky="ew", pady=(2, 8))
+perf_frame.grid(row=6, column=0, sticky="ew", pady=(2, 8))
 for col in range(3):
 	perf_frame.columnconfigure(col, weight=1)
 
@@ -1982,11 +3624,46 @@ max_output_tokens_box.grid(row=1, column=2, sticky="ew", padx=(6, 0), pady=(2, 0
 
 tk.Label(
 	card_config,
+	text="Chia chunk theo",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text_muted"],
+	font=("Segoe UI", 9, "bold"),
+).grid(row=7, column=0, sticky="w")
+
+split_mode_frame = tk.Frame(card_config, bg=PALETTE["panel"])
+split_mode_frame.grid(row=8, column=0, sticky="w", pady=(2, 8))
+
+tk.Radiobutton(
+	split_mode_frame,
+	text="Dòng === Thứ/Chương ===",
+	variable=chunk_split_mode_var,
+	value="equals",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	selectcolor=PALETTE["panel"],
+	activebackground=PALETTE["panel"],
+	activeforeground=PALETTE["text"],
+).pack(side="left", padx=(0, 12))
+
+tk.Radiobutton(
+	split_mode_frame,
+	text="Từ khóa Thứ/Chương/Chap",
+	variable=chunk_split_mode_var,
+	value="keyword",
+	bg=PALETTE["panel"],
+	fg=PALETTE["text"],
+	selectcolor=PALETTE["panel"],
+	activebackground=PALETTE["panel"],
+	activeforeground=PALETTE["text"],
+).pack(side="left")
+
+tk.Label(
+	card_config,
 	text="Nhiệt độ (0-2)",
 	bg=PALETTE["panel"],
 	fg=PALETTE["text_muted"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=4, column=0, sticky="w")
+).grid(row=9, column=0, sticky="w")
 temp_scale = ttk.Scale(
 	card_config,
 	from_=0.0,
@@ -1996,7 +3673,7 @@ temp_scale = ttk.Scale(
 	length=200,
 	style="Accent.Horizontal.TScale",
 )
-temp_scale.grid(row=5, column=0, sticky="ew")
+temp_scale.grid(row=10, column=0, sticky="ew")
 temp_label = tk.Label(
 	card_config,
 	textvariable=temp_var,
@@ -2004,7 +3681,7 @@ temp_label = tk.Label(
 	fg=PALETTE["accent"],
 	font=("Segoe UI", 10, "bold"),
 )
-temp_label.grid(row=5, column=1, padx=(8, 0))
+temp_label.grid(row=10, column=1, padx=(8, 0))
 
 
 def update_temp_label(event=None):
@@ -2069,13 +3746,62 @@ glossary_text = tk.Text(
 glossary_text.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
 glossary_text.insert(tk.END, DEFAULT_GLOSSARY)
 
+prompt_header_frame = tk.Frame(card_prompt, bg=PALETTE["panel"])
+prompt_header_frame.grid(row=3, column=0, sticky="ew", pady=(0, 4))
+
 tk.Label(
-	card_prompt,
-	text="Prompt dịch giả",
+	prompt_header_frame,
+	text="Chọn Prompt:",
 	bg=PALETTE["panel"],
-	fg=PALETTE["text_muted"],
+	fg=PALETTE["text"],
 	font=("Segoe UI", 9, "bold"),
-).grid(row=3, column=0, sticky="w", pady=(0, 4))
+).pack(side="left", padx=(0, 6))
+
+prompt_cb = ttk.Combobox(
+	prompt_header_frame,
+	values=[],
+	textvariable=current_prompt_name_var,
+	state="readonly",
+	width=25,
+)
+prompt_cb.pack(side="left", padx=4)
+prompt_cb.bind("<<ComboboxSelected>>", on_prompt_select)
+
+tk.Button(
+	prompt_header_frame,
+	text="Đổi tên",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=rename_prompt,
+).pack(side="left", padx=4)
+
+tk.Button(
+	prompt_header_frame,
+	text="Thêm mới",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=add_new_prompt,
+).pack(side="left", padx=4)
+
+tk.Button(
+	prompt_header_frame,
+	text="Xóa",
+	font=("Segoe UI", 8, "bold"),
+	bg=PALETTE["warn"],
+	fg="#0b0f19",
+	bd=0,
+	padx=8,
+	pady=3,
+	command=delete_prompt,
+).pack(side="left", padx=4)
 
 prompt_text = tk.Text(
 	card_prompt,
@@ -2271,6 +3997,7 @@ history_columns = (
 
 history_table = ttk.Treeview(history_table_frame, columns=history_columns, show="headings", style="History.Treeview")
 history_table.grid(row=0, column=0, sticky="nsew")
+history_table.bind("<ButtonRelease-1>", on_history_row_click)
 
 history_scroll_y = ttk.Scrollbar(history_table_frame, orient="vertical", command=history_table.yview)
 history_scroll_y.grid(row=0, column=1, sticky="ns")
@@ -2312,6 +4039,74 @@ history_table.tag_configure("status_error", foreground="#000000")
 
 card_history.rowconfigure(2, weight=1)
 
+card_requests = build_card(requests_tab, "📈 Request / phút", 0, 0, colspan=1)
+requests_toolbar = tk.Frame(card_requests, bg=PALETTE["panel"])
+requests_toolbar.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+requests_toolbar.columnconfigure(0, weight=1)
+requests_hint_var = tk.StringVar(value="Hiển thị danh sách bản dịch (nhấn để xem request/phút).")
+requests_hint_label = tk.Label(requests_toolbar, textvariable=requests_hint_var, bg=PALETTE["panel"], fg="#000000", font=("Segoe UI", 9))
+requests_hint_label.grid(row=0, column=0, sticky="w")
+tk.Button(
+	requests_toolbar,
+	text="🔄 Làm mới",
+	font=("Segoe UI", 9, "bold"),
+	bg=PALETTE["accent_alt"],
+	fg="#0b0f19",
+	bd=0,
+	padx=10,
+	pady=5,
+	command=refresh_request_stats_display,
+).grid(row=0, column=1, padx=(8, 0))
+
+requests_table_frame = tk.Frame(card_requests, bg=PALETTE["panel"])
+requests_table_frame.grid(row=2, column=0, sticky="nsew")
+requests_table_frame.columnconfigure(0, weight=1)
+requests_table_frame.rowconfigure(0, weight=1)
+
+requests_columns = (
+	"start_at",
+	"status",
+	"model",
+	"total_requests",
+	"peak_rpm",
+	"duration",
+	"files",
+)
+
+requests_table = ttk.Treeview(requests_table_frame, columns=requests_columns, show="headings", style="History.Treeview")
+requests_table.grid(row=0, column=0, sticky="nsew")
+requests_table.bind("<ButtonRelease-1>", on_request_row_click)
+
+requests_scroll_y = ttk.Scrollbar(requests_table_frame, orient="vertical", command=requests_table.yview)
+requests_scroll_y.grid(row=0, column=1, sticky="ns")
+requests_scroll_x = ttk.Scrollbar(requests_table_frame, orient="horizontal", command=requests_table.xview)
+requests_scroll_x.grid(row=1, column=0, sticky="ew")
+requests_table.configure(yscrollcommand=requests_scroll_y.set, xscrollcommand=requests_scroll_x.set)
+
+requests_table.heading("start_at", text="Bắt đầu")
+requests_table.heading("status", text="Trạng thái")
+requests_table.heading("model", text="Model")
+requests_table.heading("total_requests", text="Tổng request")
+requests_table.heading("peak_rpm", text="Peak/phút")
+requests_table.heading("duration", text="Thời gian")
+requests_table.heading("files", text="File")
+
+requests_table.column("start_at", width=145, anchor="w")
+requests_table.column("status", width=95, anchor="center")
+requests_table.column("model", width=180, anchor="w")
+requests_table.column("total_requests", width=120, anchor="e")
+requests_table.column("peak_rpm", width=110, anchor="e")
+requests_table.column("duration", width=90, anchor="center")
+requests_table.column("files", width=360, anchor="w")
+
+requests_table.tag_configure("odd", background=PALETTE["input_bg"])
+requests_table.tag_configure("even", background=PALETTE["panel"])
+requests_table.tag_configure("status_completed", foreground="#000000")
+requests_table.tag_configure("status_stopped", foreground="#000000")
+requests_table.tag_configure("status_error", foreground="#000000")
+
+card_requests.rowconfigure(2, weight=1)
+
 for i in range(6):
 	translate_tab.rowconfigure(i, weight=1 if i in [3, 5] else 0)
 
@@ -2329,10 +4124,19 @@ root.protocol("WM_DELETE_WINDOW", on_closing)
 
 add_log("📂 Đã tải cài đặt từ lần sử dụng trước.")
 add_log("🔐 API Key được mã hóa khi lưu, chỉ hoạt động trên máy này.")
-add_log("🌐 Sử dụng DeepSeek API chuẩn OpenAI-compatible qua endpoint /chat/completions.")
+if not ensure_drive_dependencies():
+	add_log("⚠️ Thiếu thư viện Google Drive. Cài bằng: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
 refresh_history_display()
 try:
+	refresh_request_stats_display()
+except NameError:
+	pass
+try:
 	refresh_cost_stats()
+except NameError:
+	pass
+try:
+	update_thinking_level_state()
 except NameError:
 	pass
 
