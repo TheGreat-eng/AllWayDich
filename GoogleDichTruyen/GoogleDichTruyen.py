@@ -794,10 +794,22 @@ def build_prompt_with_glossary(base_prompt, glossary_entries):
 	if not glossary_entries:
 		return base_prompt
 
-	glossary_lines = "\n".join([f"- {src} => {dst}" for src, dst in glossary_entries])
+	# Xử lý các mục glossary để trích xuất nội dung giải thích trong ngoặc làm bản dịch đích nếu có
+	processed_entries = []
+	for src, dst in glossary_entries:
+		import re
+		# Tìm nội dung nằm trong dấu ngoặc đơn
+		match = re.search(r'\(([^)]+)\)?', dst)
+		if match:
+			dst_cleaned = match.group(1).strip()
+		else:
+			dst_cleaned = dst
+		processed_entries.append((src, dst_cleaned))
+
+	glossary_lines = "\n".join([f"- {src} => {dst}" for src, dst in processed_entries])
 	glossary_instruction = (
 		"\nQUY TẮC THUẬT NGỮ BẮT BUỘC (ƯU TIÊN CAO):\n"
-		"- Khi gặp thuật ngữ ở cột trái, phải dùng đúng thuật ngữ cột phải.\n"
+		"- Khi gặp thuật ngữ ở cột trái, phải dịch sang thuật ngữ ở cột phải tương ứng.\n"
 		"- Giữ nhất quán tuyệt đối toàn bộ chương và các chương tiếp theo.\n"
 		"- Không tự ý đổi biến thể khác nếu glossary đã quy định.\n"
 		f"{glossary_lines}\n"
@@ -1865,7 +1877,7 @@ def normalize_scanned_glossary(raw_text):
 
 		source, target = clean.split(separator, 1)
 		source = source.strip(" \t\"'“”‘’[](){}")
-		target = target.strip(" \t\"'“”‘’[](){}")
+		target = target.strip(" \t\"'“”‘’[]{}")
 		if not source or not target:
 			continue
 
@@ -1953,18 +1965,23 @@ def scan_story():
 
 			scan_prompt = (
 				"Bạn là chuyên gia biên tập truyện dịch từ Trung sang Việt.\n"
-				"Hãy trích xuất danh sách thuật ngữ quan trọng từ đoạn sau, ưu tiên:\n\n"
-				"1. TỪ HÁN VIỆT CẦN CHUYỂN SANG THUẦN VIỆT (định dạng: từ_hán_việt => từ_thuần_việt):\n"
-				"   VD: phát_hiện => tìm_thấy, cao_hứng => vui_vẻ, chuẩn_bị => sắp_sửa\n\n"
-				"2. TÊN RIÊNG - TÊN NHÂN VẬT, ĐỊA DANH (định dạng: tên_gốc => tên_đã_dịch):\n"
-				"   VD: 张三 => Trương Tam, 青云门 => Thanh Vân Môn\n\n"
-				"3. CÁCH HÔ / XƯNG HÔ GIỮA NHÂN VẬT (định dạng: cách_hô_gốc => cách_hô_việt):\n"
-				"   VD: 师兄 => sư huynh, 宝贝 => bảo bối, 主人 => chủ nhân\n\n"
+				"Hãy trích xuất danh sách thuật ngữ quan trọng từ đoạn sau để đưa vào từ điển đồng nhất (Glossary), ưu tiên:\n\n"
+				"1. TÊN RIÊNG (Tên nhân vật, địa danh, môn phái, thế lực, thần khí, bảo vật):\n"
+				"   VD: 张三 => Trương Tam, 青云门 => Thanh Vân Môn (Cổng Mây Xanh), 轩辕剑 => Kiếm Hiên Viên\n\n"
+				"2. CẢNH GIỚI TU LUYỆN, CHIÊU THỨC, CÔNG PHÁP (Các danh từ cài đặt đặc thù của truyện):\n"
+				"   VD: 筑基 => Trúc Cơ (xây dựng nền móng tu luyện), 炼气 => Luyện Khí (rèn luyện khí trong người), 降龙十八掌 => Giáng Long Thập Bát Chưởng (mười tám chưởng rồng bay)\n\n"
+				"3. CÁCH XƯNG HÔ ĐẶC THÙ (Cách xưng hô cổ trang hoặc đặc trưng của nhân vật):\n"
+				"   VD: 师兄 => Sư huynh (đàn anh), 本座 => Bổn tọa (ta), 朕 => Trẫm (ta)\n\n"
 				"ĐỊNH DẠNG BẮT BUỘC: mỗi dòng một mục theo mẫu: Nguồn => Đích\n\n"
-				"YÊU CẦU:\n"
-				"- Không giải thích, không đánh số, không thêm tiêu đề\n"
-				"- Không lặp mục đã có\n"
-				"- Nếu không có thuật ngữ thì trả: Không có"
+				"YÊU CẦU DỊCH VÀ GIẢI THÍCH (CỰC KỲ QUAN TRỌNG):\n"
+				"- Hãy ưu tiên dịch từ đích sang Thuần Việt dễ hiểu nhất có thể để người đọc hiểu luôn ý nghĩa của câu văn.\n"
+				"- Nếu bắt buộc phải giữ Hán Việt (do là thuật ngữ cảnh giới, địa danh đặc thù...), hãy giữ Hán Việt và BẮT BUỘC phải ghi chú giải thích ý nghĩa trong dấu ngoặc đơn ngay sau từ đó.\n"
+				"  LƯU Ý CỐT LÕI: Phần giải thích trong ngoặc đơn sẽ được hệ thống dùng trực tiếp để thay thế làm từ dịch chính vào truyện. Do đó, hãy viết phần giải thích này cực kỳ ngắn gọn, tự nhiên và phù hợp để thay thế trực tiếp vào câu văn (Ví dụ: thay vì giải thích dài dòng 'người lớn hơn cùng môn phái', hãy ghi ngắn gọn trong ngoặc đơn là 'đàn anh' hoặc 'anh lớn' để thay thế trực tiếp vào câu văn dịch).\n\n"
+				"YÊU CẦU CỰC KỲ QUAN TRỌNG:\n"
+				"- Chỉ quét các danh từ riêng, thuật ngữ đặc thù cần giữ đồng nhất. KHÔNG quét các từ vựng thông thường (VD: KHÔNG đưa 'phát hiện => tìm thấy', 'chuẩn bị => sắp sửa' vào vì chúng làm cứng nhắc văn phong).\n"
+				"- Không giải thích gì ngoài cấu trúc 'Nguồn => Đích' (ngoại trừ phần giải thích trong ngoặc đơn ở cột đích như yêu cầu ở trên), không đánh số đầu dòng kết quả trả về, không thêm tiêu đề.\n"
+				"- Không lặp mục đã có.\n"
+				"- Nếu không có thuật ngữ phù hợp thì trả về duy nhất từ: Không có"
 			)
 
 			merged_terms = []
@@ -2436,6 +2453,7 @@ def translate_clipboard_text():
 root = tk.Tk()
 root.title("📖 App Dịch Truyện – Powered by Google Gemini")
 root.geometry("1100x950")
+root.bind_class("TCombobox", "<MouseWheel>", lambda e: "break")
 root.minsize(800, 600)
 
 root.configure(bg=PALETTE["bg"])

@@ -19,6 +19,7 @@ DEFAULT_MODELS = [
 	"moonshot-v1-8k",
 	"moonshot-v1-32k",
 	"moonshot-v1-128k",
+	"vpsnodelab/deepseek-v4-pro",
 ]
 
 DEFAULT_PROMPT = (
@@ -61,8 +62,20 @@ def normalize_base_url(raw_input):
 	if not value:
 		return ""
 
+	# Remove common API path suffixes
+	for suffix in ["/v1/chat/completions", "/v1/chat/completions/", "/v1/models", "/v1/models/", "/v1", "/v1/"]:
+		if value.endswith(suffix):
+			value = value[:-len(suffix)]
+			break
+
 	if not value.startswith("http://") and not value.startswith("https://"):
-		value = f"http://{value}"
+		host = value.split(":")[0]
+		ip_parts = host.split(".")
+		is_ip = len(ip_parts) == 4 and all(p.isdigit() for p in ip_parts)
+		if is_ip or host.lower() == "localhost":
+			value = f"http://{value}"
+		else:
+			value = f"https://{value}"
 
 	parsed = urllib.parse.urlparse(value)
 	netloc = parsed.netloc
@@ -72,9 +85,13 @@ def normalize_base_url(raw_input):
 		return ""
 
 	if ":" not in netloc:
-		netloc = f"{netloc}:8000"
+		host = netloc
+		ip_parts = host.split(".")
+		is_ip = len(ip_parts) == 4 and all(p.isdigit() for p in ip_parts)
+		if is_ip or host.lower() == "localhost":
+			netloc = f"{netloc}:8000"
 
-	scheme = parsed.scheme or "http"
+	scheme = parsed.scheme or "https"
 	return f"{scheme}://{netloc}{path}".rstrip("/")
 
 
@@ -110,7 +127,7 @@ def split_text_into_chunks(text, chunk_size):
 class KimiTranslatorApp:
 	def __init__(self, root):
 		self.root = root
-		self.root.title("DichTruyen - Kimi Proxy (VPS + Refresh Token)")
+		self.root.title("DichTruyen - API Translation Tool")
 		self.root.geometry("1120x760")
 		self.root.minsize(980, 700)
 
@@ -122,9 +139,9 @@ class KimiTranslatorApp:
 		self.settings = load_json_file(
 			SETTINGS_FILE,
 			{
-				"vps_ip": "",
-				"refresh_token": "",
-				"model": DEFAULT_MODELS[-1],
+				"vps_ip": "https://api.xah.io",
+				"refresh_token": "sk-d550a12461017a360f1c942f4271eae296bd6f10aca64c15d70847e46e6caf3c",
+				"model": "vpsnodelab/deepseek-v4-pro",
 				"input_file": "",
 				"output_file": "",
 				"chunk_size": "3500",
@@ -231,19 +248,19 @@ class KimiTranslatorApp:
 		ttk.Label(header, text="Dich Truyen AI Proxy", style="Title.TLabel").grid(row=0, column=0, sticky="w")
 		ttk.Label(
 			header,
-			text="Nhap VPS + refresh token, chon model, va dich nhanh theo chunk da luong.",
+			text="Nhap API Base URL / VPS IP, chon model va dich nhanh theo chunk da luong.",
 			style="SubTitle.TLabel",
 		).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
-		conn_group = ttk.LabelFrame(main, text="Ket noi VPS", padding=12, style="Card.TLabelframe")
+		conn_group = ttk.LabelFrame(main, text="Ket noi API / VPS", padding=12, style="Card.TLabelframe")
 		conn_group.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 		conn_group.columnconfigure(1, weight=1)
 
-		ttk.Label(conn_group, text="IP VPS / Base URL:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+		ttk.Label(conn_group, text="Base URL / IP VPS:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
 		self.vps_ip_var = tk.StringVar()
 		ttk.Entry(conn_group, textvariable=self.vps_ip_var).grid(row=0, column=1, columnspan=3, sticky="ew", pady=4)
 
-		ttk.Label(conn_group, text="Refresh Token:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+		ttk.Label(conn_group, text="API Key / Token:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
 		self.refresh_token_var = tk.StringVar()
 		self.refresh_entry = ttk.Entry(conn_group, textvariable=self.refresh_token_var, show="*")
 		self.refresh_entry.grid(
