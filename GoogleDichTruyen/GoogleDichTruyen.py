@@ -40,7 +40,9 @@ except ImportError:
 # ================= CẤU HÌNH GEMINI =================
 MODELS = [
 	"gemini-3-flash-preview",
+	"gemini-3.6-flash",
 	"gemini-3.5-flash",
+	"gemini-3.5-flash-lite",
 	"gemini-3.1-pro-preview",
 	"gemini-2.5-flash",
 	"gemini-2.5-flash-lite",
@@ -91,7 +93,9 @@ stats = {
 
 
 MODEL_PRICING = {
+	"gemini-3.6-flash": {"input_per_1m": 1.50, "output_per_1m": 7.50},
 	"gemini-3.5-flash": {"input_per_1m": 1.50, "output_per_1m": 9.00},
+	"gemini-3.5-flash-lite": {"input_per_1m": 0.30, "output_per_1m": 2.50},
 	"gemini-3.1-pro-preview": {
 		"input_per_1m_le_200k": 2.00,
 		"input_per_1m_gt_200k": 4.00,
@@ -2326,8 +2330,8 @@ def show_diff_window(original_text: str, translated_text: str, input_file: str, 
 	
 	main_frame = tk.Frame(diff_win, bg=PALETTE["bg"])
 	main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-	main_frame.columnconfigure(0, weight=1)
-	main_frame.columnconfigure(1, weight=1)
+	main_frame.columnconfigure(0, weight=1, uniform="diff_group")
+	main_frame.columnconfigure(1, weight=1, uniform="diff_group")
 	
 	# Cột trái: Gốc
 	left_label = tk.Label(main_frame, text="📄 Bản gốc (Trung)", bg=PALETTE["panel"], fg=PALETTE["text"], font=("Segoe UI", 10, "bold"))
@@ -2654,7 +2658,7 @@ tabs.add(requests_tab, text="📈 Request/phút")
 tabs.add(stats_tab, text="💰 Thống kê chi phí")
 
 for col in range(2):
-	translate_tab.columnconfigure(col, weight=1)
+	translate_tab.columnconfigure(col, weight=1, uniform="col_group")
 
 quick_translate_tab.columnconfigure(0, weight=1)
 quick_translate_tab.rowconfigure(1, weight=1)
@@ -3879,7 +3883,7 @@ for i, var in enumerate([
 	).grid(row=1 + i // 2, column=i % 2, sticky="w", padx=8, pady=4)
 
 card_progress = build_card(translate_tab, "🚀 Điều khiển & tiến độ", 1, 4)
-progress_bar = ttk.Progressbar(card_progress, style="Accent.Horizontal.TProgressbar", length=400, mode="determinate")
+progress_bar = ttk.Progressbar(card_progress, style="Accent.Horizontal.TProgressbar", length=100, mode="determinate")
 progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 8))
 status_var = tk.StringVar(value="Sẵn sàng")
 tk.Label(

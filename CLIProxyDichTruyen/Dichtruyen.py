@@ -42,7 +42,10 @@ DEFAULT_MODELS = [
 	"thanhnhan9023/claude-opus-4.8",
 	"lohieuky1/grok-4.5",
 	"vuduythanh2023/gemini-3.5-flash",
-	"gemini-3.1-pro-high"
+	"gemini-3.1-pro-high",
+	"hotrovlg/vult-gpt-5.5",
+	"levuphong2909/gpt-5.6-sol",
+	"stableai/claude-opus-4-7-kr"
 ]
 MODELS = DEFAULT_MODELS
 
@@ -67,6 +70,7 @@ DEFAULT_GLOSSARY = ""
 # ================= BIẾN ĐIỀU KHIỂN TẠM DỪNG =================
 is_paused = False
 is_stopped = False
+active_run_id = 0
 pause_event = threading.Event()
 pause_event.set()
 
@@ -1276,39 +1280,50 @@ def translate_with_proxy(model_id, prompt, chunk, temperature, max_output_tokens
 		return None, 0, 0, f"JSON Parse Error: {e}"
 
 # ================= DỊCH 1 CHUNK =================
-def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3):
-	global is_stopped
+def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3, run_id=None):
+	global is_stopped, active_run_id
 	pause_event.wait()
-	if is_stopped: return index, None
+	if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
 	if model_fallback_order is None: model_fallback_order = [model_id]
 	last_error = None
 	current_model_index = 0
 	for attempt in range(retries):
-		if is_stopped: return index, None
+		if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
 		pause_event.wait()
 		try:
 			current_model = model_fallback_order[current_model_index] if current_model_index < len(model_fallback_order) else model_fallback_order[0]
+			if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
 			add_log(f"⏳ Đang dịch đoạn {index + 1} (model: {current_model})... (lần thử {attempt + 1}/{retries})")
 			record_request_event(current_model)
 			translated_text, input_tokens, output_tokens, error_code = translate_with_proxy(current_model, prompt, chunk, temperature, max_output_tokens)
+			if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
 			if error_code == 'QUOTA':
 				if current_model_index + 1 < len(model_fallback_order):
 					current_model_index += 1
 					next_model = model_fallback_order[current_model_index]
 					add_log(f"⚠️ Đoạn {index + 1}: Vượt quota model '{current_model}', chuyển sang '{next_model}'...")
-					time.sleep(1)
+					for _ in range(10):
+						if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
+						time.sleep(0.1)
 					continue
 				else:
 					add_log(f"❌ Đoạn {index + 1}: Tất cả model đều vượt quota!")
 					last_error = "Tất cả model vượt quota"
-					time.sleep(2 + attempt * 2)
+					sleep_duration = 2 + attempt * 2
+					for _ in range(int(sleep_duration * 10)):
+						if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
+						time.sleep(0.1)
 					continue
 			if error_code:
 				last_error = f"Lỗi API: {error_code}"
 				add_log(f"⚠️ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
-				time.sleep(2 + attempt * 2)
+				sleep_duration = 2 + attempt * 2
+				for _ in range(int(sleep_duration * 10)):
+					if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
+					time.sleep(0.1)
 				continue
 			if not translated_text: raise RuntimeError("API trả về nội dung rỗng.")
+			if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
 			save_checkpoint(cp_file, index, translated_text)
 			stats["chunks_done"] += 1
 			stats["total_input_chars"] += len(chunk)
@@ -1325,8 +1340,13 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			return index, translated_text
 		except Exception as e:
 			last_error = str(e)
+			if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
 			add_log(f"❌ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
-			time.sleep(2 + attempt * 2)
+			sleep_duration = 2 + attempt * 2
+			for _ in range(int(sleep_duration * 10)):
+				if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
+				time.sleep(0.1)
+	if is_stopped or (run_id is not None and run_id != active_run_id): return index, None
 	add_log(f"🔴 Đoạn {index + 1} thất bại sau {retries} lần thử: {last_error}")
 	return index, None
 
@@ -1565,10 +1585,11 @@ def fetch_models():
 
 # ================= 1. PHƯƠNG THỨC KÍCH HOẠT (START) =================
 def start_translation():
-	global is_stopped, is_paused
+	global is_stopped, is_paused, active_run_id
 	if not validate_inputs(): return
 	is_stopped = False
 	is_paused = False
+	active_run_id += 1
 	pause_event.set()
 	output_path.set(build_default_output_path(input_path.get(), model_var.get()))
 	add_log(f"📄 File output mặc định: {output_path.get()}")
@@ -1588,7 +1609,8 @@ def stats_update_loop():
 
 # ================= 2. PHƯƠNG THỨC LOGIC CHÍNH (LOGIC) =================
 def process_translation_logic():
-	global is_stopped
+	global is_stopped, active_run_id
+	run_id = active_run_id
 	btn_start.config(state="disabled")
 	btn_pause.config(state="normal")
 	btn_stop.config(state="normal")
@@ -1663,15 +1685,15 @@ def process_translation_logic():
 		add_log(f"📦 Bắt đầu dịch {len(pending_indices)} đoạn còn lại bằng {model}...")
 		add_log(f"⚙️ Chunk size: {chunk_size} | Max output tokens: {max_output_tokens}")
 		add_log(f"🌡️ Temperature: {temperature}")
-		with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+		executor = concurrent.futures.ThreadPoolExecutor(max_workers=threads)
+		try:
 			futures = {
 				executor.submit(
-					translate_chunk, model, prompt, chunks[i], i, cp_file, temperature, max_output_tokens, model_fallback_order
+					translate_chunk, model, prompt, chunks[i], i, cp_file, temperature, max_output_tokens, model_fallback_order, 3, run_id
 				): i for i in pending_indices
 			}
 			for future in concurrent.futures.as_completed(futures):
-				if is_stopped:
-					executor.shutdown(wait=False, cancel_futures=True)
+				if is_stopped or run_id != active_run_id:
 					break
 				idx, translated = future.result()
 				if translated is not None:
@@ -1680,9 +1702,13 @@ def process_translation_logic():
 					progress_bar["value"] = current_val
 					status_var.set(f"Tiến độ: {int(current_val)}/{total}")
 					root.update_idletasks()
-		if is_stopped:
-			add_log("🛑 Đã dừng dịch. Tiến trình đã được lưu vào checkpoint.")
-			messagebox.showinfo("Đã dừng", "Quá trình dịch đã dừng.\nTiến trình được lưu, bạn có thể tiếp tục sau.")
+		finally:
+			executor.shutdown(wait=False, cancel_futures=True)
+
+		if is_stopped or run_id != active_run_id:
+			if run_id == active_run_id:
+				add_log("🛑 Đã dừng dịch. Tiến trình đã được lưu vào checkpoint.")
+				messagebox.showinfo("Đã dừng", "Quá trình dịch đã dừng.\nTiến trình được lưu, bạn có thể tiếp tục sau.")
 			history_status = "stopped"
 			return
 		with open(out_file, "w", encoding="utf-8") as f:
@@ -1719,47 +1745,48 @@ def process_translation_logic():
 		add_log(f"🛑 LỖI HỆ THỐNG: {error_msg}")
 		messagebox.showerror("Lỗi", f"Quá trình dịch bị gián đoạn: {error_msg}")
 	finally:
-		end_time = time.time()
-		duration_seconds = max(0, int(end_time - stats["start_time"])) if stats["start_time"] else 0
-		request_metrics = get_request_metrics_snapshot()
-		total_requests, peak_requests_per_minute, _ = summarize_request_counts(request_metrics)
-		history_entry = {
-			"engine": "API Proxy / VPS",
-			"status": history_status,
-			"start_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["start_time"] if stats["start_time"] else end_time)),
-			"end_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_time)),
-			"duration_seconds": duration_seconds,
-			"input_file": in_file,
-			"output_file": out_file,
-			"model": model,
-			"threads": threads,
-			"temperature": temperature,
-			"chunks_done": stats["chunks_done"],
-			"total_chunks": stats["total_chunks"],
-			"total_input_chars": stats["total_input_chars"],
-			"total_output_chars": stats["total_output_chars"],
-			"total_input_tokens": stats["total_input_tokens"],
-			"total_output_tokens": stats["total_output_tokens"],
-			"total_input_cost_usd": round(stats["total_input_cost_usd"], 6),
-			"total_output_cost_usd": round(stats["total_output_cost_usd"], 6),
-			"total_cost_usd": round(stats["total_cost_usd"], 6),
-			"total_cost_vnd": int(round(stats["total_cost_usd"] * USD_TO_VND)),
-			"request_counts_by_minute": request_metrics,
-			"total_requests": total_requests,
-			"peak_requests_per_minute": peak_requests_per_minute,
-			"drive_file_id": drive_file_id,
-			"drive_link": drive_link,
-			"error": history_error,
-		}
-		save_translation_history_entry(history_entry)
-		refresh_history_display()
-		try: refresh_cost_stats()
-		except: pass
-		btn_start.config(state="normal")
-		btn_pause.config(state="disabled", text="⏸️ TẠM DỪNG", bg="#FFC107")
-		btn_stop.config(state="disabled")
-		status_var.set("Sẵn sàng")
-		is_stopped = True
+		if run_id == active_run_id:
+			end_time = time.time()
+			duration_seconds = max(0, int(end_time - stats["start_time"])) if stats["start_time"] else 0
+			request_metrics = get_request_metrics_snapshot()
+			total_requests, peak_requests_per_minute, _ = summarize_request_counts(request_metrics)
+			history_entry = {
+				"engine": "API Proxy / VPS",
+				"status": history_status,
+				"start_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["start_time"] if stats["start_time"] else end_time)),
+				"end_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_time)),
+				"duration_seconds": duration_seconds,
+				"input_file": in_file,
+				"output_file": out_file,
+				"model": model,
+				"threads": threads,
+				"temperature": temperature,
+				"chunks_done": stats["chunks_done"],
+				"total_chunks": stats["total_chunks"],
+				"total_input_chars": stats["total_input_chars"],
+				"total_output_chars": stats["total_output_chars"],
+				"total_input_tokens": stats["total_input_tokens"],
+				"total_output_tokens": stats["total_output_tokens"],
+				"total_input_cost_usd": round(stats["total_input_cost_usd"], 6),
+				"total_output_cost_usd": round(stats["total_output_cost_usd"], 6),
+				"total_cost_usd": round(stats["total_cost_usd"], 6),
+				"total_cost_vnd": int(round(stats["total_cost_usd"] * USD_TO_VND)),
+				"request_counts_by_minute": request_metrics,
+				"total_requests": total_requests,
+				"peak_requests_per_minute": peak_requests_per_minute,
+				"drive_file_id": drive_file_id,
+				"drive_link": drive_link,
+				"error": history_error,
+			}
+			save_translation_history_entry(history_entry)
+			refresh_history_display()
+			try: refresh_cost_stats()
+			except: pass
+			btn_start.config(state="normal")
+			btn_pause.config(state="disabled", text="⏸️ TẠM DỪNG", bg="#FFC107")
+			btn_stop.config(state="disabled")
+			status_var.set("Sẵn sàng")
+			is_stopped = True
 
 # ================= 2. DIFF VIEWER - SO SÁNH FILE =================
 def show_diff_window(original_text: str, translated_text: str, input_file: str, output_file: str):
