@@ -586,6 +586,12 @@ def get_checkpoint_path(input_file):
 	return f"{base_name}.resume.json"
 
 
+def get_failed_chunks_path(input_file):
+	"""Return the sidecar file that retains chunks which exhausted all retries."""
+	base_name = os.path.splitext(input_file)[0]
+	return f"{base_name}.failed_chunks.json"
+
+
 def sanitize_filename_part(raw_value, fallback):
 	if not raw_value:
 		return fallback
@@ -853,6 +859,63 @@ def save_checkpoint(cp_file, index, text):
 				json.dump(data, f, ensure_ascii=False, indent=2)
 		except Exception as e:
 			print(f"Lỗi khi lưu checkpoint: {e}")
+
+
+def load_failed_chunks(failed_file):
+	"""Load failed-chunk records safely; an invalid file is treated as empty."""
+	with checkpoint_lock:
+		try:
+			if not os.path.exists(failed_file):
+				return {}
+			with open(failed_file, "r", encoding="utf-8") as f:
+				data = json.load(f)
+			return data if isinstance(data, dict) else {}
+		except Exception as e:
+			print(f"Could not load failed chunk records: {e}")
+			return {}
+
+
+def save_failed_chunk(failed_file, index, chunk, error, attempts):
+	"""Persist the source and error so a failed chunk can be retried later."""
+	with checkpoint_lock:
+		try:
+			data = {}
+			if os.path.exists(failed_file):
+				with open(failed_file, "r", encoding="utf-8") as f:
+					loaded = json.load(f)
+					if isinstance(loaded, dict):
+						data = loaded
+
+			data[str(index)] = {
+				"index": index,
+				"source_text": chunk,
+				"last_error": error or "Unknown error",
+				"attempts": attempts,
+				"failed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+			}
+			with open(failed_file, "w", encoding="utf-8") as f:
+				json.dump(data, f, ensure_ascii=False, indent=2)
+		except Exception as e:
+			print(f"Could not save failed chunk: {e}")
+
+
+def clear_failed_chunk(failed_file, index):
+	"""Remove a failure record only after a valid translation is saved."""
+	if not failed_file:
+		return
+	with checkpoint_lock:
+		try:
+			if not os.path.exists(failed_file):
+				return
+			with open(failed_file, "r", encoding="utf-8") as f:
+				data = json.load(f)
+			if not isinstance(data, dict) or str(index) not in data:
+				return
+			del data[str(index)]
+			with open(failed_file, "w", encoding="utf-8") as f:
+				json.dump(data, f, ensure_ascii=False, indent=2)
+		except Exception as e:
+			print(f"Could not clear failed chunk: {e}")
 
 
 def format_time(seconds):
@@ -1693,7 +1756,7 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 
 
 # ================= DỊCH 1 CHUNK =================
-def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3):
+def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3, failed_file=None):
 	global is_stopped
 
 	pause_event.wait()
@@ -1741,6 +1804,7 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 				raise RuntimeError("Gemini trả về nội dung rỗng.")
 
 			save_checkpoint(cp_file, index, translated_text)
+			clear_failed_chunk(failed_file, index)
 
 			stats["chunks_done"] += 1
 			stats["total_input_chars"] += len(chunk)
@@ -1764,6 +1828,8 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			add_log(f"❌ Đoạn {index + 1} gặp lỗi (lần {attempt + 1}): {last_error}")
 			time.sleep(2 + attempt * 2)
 
+	if failed_file:
+		save_failed_chunk(failed_file, index, chunk, last_error, retries)
 	add_log(f"🔴 Đoạn {index + 1} thất bại sau {retries} lần thử: {last_error}")
 	return index, None
 
@@ -2117,6 +2183,7 @@ def process_translation_logic():
 			fallback_order_hint_var.set(f"Thứ tự fallback hiệu lực: {' -> '.join(model_fallback_order)}")
 			add_log(f"🔄 Model fallback order: {' -> '.join(model_fallback_order)}")
 		cp_file = get_checkpoint_path(in_file)
+		failed_file = get_failed_chunks_path(in_file)
 		threads = int(thread_var.get())
 		chunk_size = int(chunk_size_var.get())
 		max_output_tokens = int(max_output_tokens_var.get())
@@ -2164,6 +2231,9 @@ def process_translation_logic():
 		progress_bar["maximum"] = total
 		pending_indices = [i for i in range(total) if results[i] is None]
 		progress_bar["value"] = total - len(pending_indices)
+		failed_records = load_failed_chunks(failed_file)
+		if failed_records:
+			add_log(f"⚠️ Phát hiện {len(failed_records)} chunk lỗi đã lưu. Các chunk chưa có checkpoint sẽ được dịch lại.")
 
 		add_log(f"📦 Bắt đầu dịch {len(pending_indices)} đoạn còn lại bằng {model}...")
 		add_log(f"⚙️ Chunk size: {chunk_size} | Max output tokens: {max_output_tokens}")
@@ -2181,6 +2251,7 @@ def process_translation_logic():
 					temperature,
 					max_output_tokens,
 					model_fallback_order,
+					failed_file=failed_file,
 				): i
 				for i in pending_indices
 			}
@@ -2216,6 +2287,12 @@ def process_translation_logic():
 					final_text.append(fallback_warning)
 			f.write("\n\n".join(final_text))
 
+		failed_records = load_failed_chunks(failed_file)
+		failed_count = len(failed_records)
+		if failed_count:
+			history_status = "completed_with_failures"
+			add_log(f"⚠️ Còn {failed_count} chunk lỗi. Đã lưu danh sách retry: {failed_file}")
+
 		if drive_upload_var.get():
 			try:
 				add_log("☁️ Đang upload file lên Google Drive...")
@@ -2244,13 +2321,15 @@ def process_translation_logic():
 		add_log(f"💵 Output Cost: ${stats['total_output_cost_usd']:.4f}")
 		add_log(f"💰 Total Cost: ${stats['total_cost_usd']:.4f}")
 		add_log(f"💸 Tổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ")
-		history_status = "completed"
+		if not failed_count:
+			history_status = "completed"
 		completion_message = (
 			f"Truyện đã được dịch xong!\n"
 			f"Thời gian: {format_time(total_time)}\n"
 			f"Tổng tiền: ${stats['total_cost_usd']:.4f}\n"
 			f"Tổng tiền Việt: {int(round(stats['total_cost_usd'] * USD_TO_VND)):,} đ\n"
-			f"Lưu tại: {out_file}"
+			+ (f"Chunk lỗi đã lưu: {failed_count} ({failed_file})\n" if failed_count else "")
+			+ f"Lưu tại: {out_file}"
 		)
 		show_completion_dialog("Hoàn tất", completion_message, drive_link)
 
@@ -2278,6 +2357,7 @@ def process_translation_logic():
 			"temperature": temperature,
 			"chunks_done": stats["chunks_done"],
 			"total_chunks": stats["total_chunks"],
+			"failed_chunks": len(load_failed_chunks(get_failed_chunks_path(in_file))) if in_file else 0,
 			"total_input_chars": stats["total_input_chars"],
 			"total_output_chars": stats["total_output_chars"],
 			"total_input_tokens": stats["total_input_tokens"],
@@ -2833,11 +2913,13 @@ preview_info_var = tk.StringVar(value="Tổng số chunk: 0")
 
 previewed_chunks = []
 translated_preview_chunks = {}
+failed_preview_chunks = {}
 
 def load_and_preview_chunks():
-	global previewed_chunks, translated_preview_chunks
+	global previewed_chunks, translated_preview_chunks, failed_preview_chunks
 	
 	translated_preview_chunks = {}
+	failed_preview_chunks = {}
 	try:
 		input_file = input_path.get()
 	except NameError:
@@ -2856,12 +2938,25 @@ def load_and_preview_chunks():
 	try:
 		text = read_file_content_safely(input_file)
 		previewed_chunks = split_text(text, size_limit, split_mode=chunk_split_mode_var.get())
+		failed_data = load_failed_chunks(get_failed_chunks_path(input_file))
+		for key, record in failed_data.items():
+			try:
+				index = int(key)
+			except (TypeError, ValueError):
+				continue
+			if 0 <= index < len(previewed_chunks) and isinstance(record, dict):
+				# Do not show stale records if the source file or chunking has changed.
+				if record.get("source_text") in (None, previewed_chunks[index]):
+					failed_preview_chunks[index] = record
 		
 		chunk_listbox.delete(0, tk.END)
 		for i, chunk in enumerate(previewed_chunks):
 			lines = chunk.strip().split("\n")
 			first_line = lines[0][:35] + "..." if len(lines[0]) > 35 else lines[0]
-			chunk_listbox.insert(tk.END, f"Chunk {i+1} ({len(chunk)} ký tự) - {first_line}")
+			if i in failed_preview_chunks:
+				chunk_listbox.insert(tk.END, f"[LỖI] Chunk {i+1} ({len(chunk)} ký tự) - {first_line}")
+			else:
+				chunk_listbox.insert(tk.END, f"Chunk {i+1} ({len(chunk)} ký tự) - {first_line}")
 		
 		# Load translated chunks if exist
 		cp_file = get_checkpoint_path(input_file)
@@ -2875,7 +2970,7 @@ def load_and_preview_chunks():
 				except Exception as e:
 					pass
 
-		preview_info_var.set(f"Tổng số chunk: {len(previewed_chunks)}")
+		preview_info_var.set(f"Tổng số chunk: {len(previewed_chunks)} | Lỗi đã lưu: {len(failed_preview_chunks)}")
 		chunk_content_text.config(state="normal")
 		chunk_content_text.delete("1.0", tk.END)
 		chunk_content_text.config(state="disabled")
@@ -2984,6 +3079,17 @@ def on_chunk_select(event):
 		chunk_translated_text.delete("1.0", tk.END)
 		if index in translated_preview_chunks:
 			chunk_translated_text.insert(tk.END, "--- BẢN DỊCH ---\n" + translated_preview_chunks[index])
+		elif index in failed_preview_chunks:
+			failure = failed_preview_chunks[index]
+			attempts = failure.get("attempts", 3)
+			error = failure.get("last_error", "Không rõ lỗi")
+			failed_at = failure.get("failed_at", "--")
+			chunk_translated_text.insert(
+				tk.END,
+				f"--- CHUNK THẤT BẠI SAU {attempts} LẦN THỬ ---\n"
+				f"Thời điểm: {failed_at}\nLỗi cuối: {error}\n\n"
+				"Bấm 'Dịch lại đoạn này' để thử lại hoặc sửa tay rồi lưu.",
+			)
 		else:
 			chunk_translated_text.insert(tk.END, "--- CHƯA DỊCH ---")
 		chunk_translated_text.config(state="disabled")
@@ -3043,7 +3149,10 @@ def open_regenerate_dialog():
 		
 		def run():
 			try:
-				_, result = translate_chunk(model, full_prompt, chunk_text, index, get_checkpoint_path(input_path.get()), temperature, max_tokens)
+				_, result = translate_chunk(
+					model, full_prompt, chunk_text, index, get_checkpoint_path(input_path.get()),
+					temperature, max_tokens, failed_file=get_failed_chunks_path(input_path.get())
+				)
 				
 				dialog.after(0, lambda: [
 					trans_text.config(state="normal"),
@@ -3080,6 +3189,8 @@ def open_regenerate_dialog():
 			saved_data[str(index)] = new_trans
 			with open(cp_file, "w", encoding="utf-8") as f:
 				json.dump(saved_data, f, ensure_ascii=False, indent=2)
+		clear_failed_chunk(get_failed_chunks_path(input_path.get()), index)
+		failed_preview_chunks.pop(index, None)
 			
 		on_chunk_select(None)
 		dialog.destroy()
