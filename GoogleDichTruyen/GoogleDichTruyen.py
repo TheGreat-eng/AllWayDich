@@ -586,6 +586,23 @@ def get_checkpoint_path(input_file):
 	return f"{base_name}.resume.json"
 
 
+def get_translation_cache_path(input_file):
+	"""Return the completed-translation cache used by the chunk editor.
+
+	A cache is deliberately separate from ``.resume.json``: the latter means a
+	translation can be resumed, while this file only lets the user inspect or
+	edit an already completed translation by chunk.
+	"""
+	base_name = os.path.splitext(input_file)[0]
+	return f"{base_name}.chunks.json"
+
+
+def get_chunk_storage_path(input_file):
+	"""Prefer an unfinished checkpoint; otherwise use the completed chunk cache."""
+	checkpoint_path = get_checkpoint_path(input_file)
+	return checkpoint_path if os.path.exists(checkpoint_path) else get_translation_cache_path(input_file)
+
+
 def get_failed_chunks_path(input_file):
 	"""Return the sidecar file that retains chunks which exhausted all retries."""
 	base_name = os.path.splitext(input_file)[0]
@@ -831,6 +848,54 @@ def build_prompt_with_glossary(base_prompt, glossary_entries):
 checkpoint_lock = threading.Lock()
 
 
+def build_checkpoint_metadata(source_text, chunk_size, split_mode, total_chunks):
+	"""Build a fingerprint so checkpoints cannot be resumed against new input."""
+	return {
+		"source_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+		"chunk_size": chunk_size,
+		"split_mode": split_mode,
+		"total_chunks": total_chunks,
+	}
+
+
+def read_checkpoint_data(file_path):
+	"""Read both the current checkpoint format and the legacy flat mapping."""
+	if not os.path.exists(file_path):
+		return {}, {}
+	with open(file_path, "r", encoding="utf-8") as f:
+		data = json.load(f)
+	if not isinstance(data, dict):
+		raise ValueError("Nội dung checkpoint không hợp lệ")
+	if isinstance(data.get("translations"), dict):
+		metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+		return metadata, data["translations"]
+	# Compatibility with checkpoints created before metadata was introduced.
+	return {}, {str(k): v for k, v in data.items() if str(k).isdigit() and isinstance(v, str)}
+
+
+def write_checkpoint_data(file_path, metadata, translations):
+	"""Persist checkpoint data atomically while the caller holds checkpoint_lock."""
+	payload = {
+		"version": 2,
+		"metadata": metadata,
+		"translations": translations,
+	}
+	temp_path = f"{file_path}.tmp"
+	with open(temp_path, "w", encoding="utf-8") as f:
+		json.dump(payload, f, ensure_ascii=False, indent=2)
+	os.replace(temp_path, file_path)
+
+
+def reset_checkpoint(file_path, metadata):
+	with checkpoint_lock:
+		write_checkpoint_data(file_path, metadata, {})
+
+
+def checkpoint_matches(metadata, expected_metadata):
+	"""Legacy checkpoints have no fingerprint and remain usable once by choice."""
+	return not metadata or metadata == expected_metadata
+
+
 def read_file_content_safely(file_path):
 	encodings = ["utf-8", "utf-8-sig", "utf-16", "cp1258", "cp1252", "latin-1"]
 	for enc in encodings:
@@ -847,16 +912,9 @@ def read_file_content_safely(file_path):
 def save_checkpoint(cp_file, index, text):
 	with checkpoint_lock:
 		try:
-			if os.path.exists(cp_file):
-				with open(cp_file, "r", encoding="utf-8") as f:
-					data = json.load(f)
-			else:
-				data = {}
-
+			metadata, data = read_checkpoint_data(cp_file)
 			data[str(index)] = text
-
-			with open(cp_file, "w", encoding="utf-8") as f:
-				json.dump(data, f, ensure_ascii=False, indent=2)
+			write_checkpoint_data(cp_file, metadata, data)
 		except Exception as e:
 			print(f"Lỗi khi lưu checkpoint: {e}")
 
@@ -899,6 +957,37 @@ def save_failed_chunk(failed_file, index, chunk, error, attempts):
 			print(f"Could not save failed chunk: {e}")
 
 
+def load_current_failed_chunks(failed_file, chunks):
+	"""Discard failure records that belong to an older source or chunk layout."""
+	records = load_failed_chunks(failed_file)
+	valid_records = {}
+	for key, record in records.items():
+		try:
+			index = int(key)
+		except (TypeError, ValueError):
+			continue
+		if (
+			isinstance(record, dict)
+			and 0 <= index < len(chunks)
+			and record.get("source_text") == chunks[index]
+		):
+			valid_records[str(index)] = record
+
+	if valid_records == records:
+		return valid_records
+
+	with checkpoint_lock:
+		try:
+			if valid_records:
+				with open(failed_file, "w", encoding="utf-8") as f:
+					json.dump(valid_records, f, ensure_ascii=False, indent=2)
+			elif os.path.exists(failed_file):
+				os.remove(failed_file)
+		except Exception as e:
+			print(f"Could not clean stale failed chunk records: {e}")
+	return valid_records
+
+
 def clear_failed_chunk(failed_file, index):
 	"""Remove a failure record only after a valid translation is saved."""
 	if not failed_file:
@@ -912,8 +1001,11 @@ def clear_failed_chunk(failed_file, index):
 			if not isinstance(data, dict) or str(index) not in data:
 				return
 			del data[str(index)]
-			with open(failed_file, "w", encoding="utf-8") as f:
-				json.dump(data, f, ensure_ascii=False, indent=2)
+			if data:
+				with open(failed_file, "w", encoding="utf-8") as f:
+					json.dump(data, f, ensure_ascii=False, indent=2)
+			else:
+				os.remove(failed_file)
 		except Exception as e:
 			print(f"Could not clear failed chunk: {e}")
 
@@ -2195,9 +2287,12 @@ def process_translation_logic():
 		if glossary_entries:
 			add_log(f"📚 Áp dụng glossary: {len(glossary_entries)} mục thuật ngữ.")
 
-		chunks = split_text(read_file_content_safely(in_file), size=chunk_size, split_mode=chunk_split_mode_var.get())
+		split_mode = chunk_split_mode_var.get()
+		source_text = read_file_content_safely(in_file)
+		chunks = split_text(source_text, size=chunk_size, split_mode=split_mode)
 
 		total = len(chunks)
+		checkpoint_metadata = build_checkpoint_metadata(source_text, chunk_size, split_mode, total)
 		stats["total_chunks"] = total
 		results = [None] * total
 
@@ -2206,9 +2301,11 @@ def process_translation_logic():
 		with checkpoint_lock:
 			if os.path.exists(cp_file):
 				try:
-					with open(cp_file, "r", encoding="utf-8") as f:
-						saved_data = json.load(f)
-					has_checkpoint = True
+					saved_metadata, saved_data = read_checkpoint_data(cp_file)
+					has_checkpoint = checkpoint_matches(saved_metadata, checkpoint_metadata)
+					if not has_checkpoint:
+						add_log("⚠️ Checkpoint không khớp file nguồn hoặc cách chia chunk; sẽ tạo tiến trình mới.")
+						saved_data = {}
 				except Exception as e:
 					add_log(f"⚠️ Không thể đọc file checkpoint (file lỗi hoặc rỗng): {e}")
 
@@ -2223,15 +2320,16 @@ def process_translation_logic():
 						results[idx] = text
 				stats["chunks_done"] = len([r for r in results if r is not None])
 				add_log(f"🔄 Đã khôi phục {stats['chunks_done']} đoạn từ file checkpoint.")
+			else:
+				reset_checkpoint(cp_file, checkpoint_metadata)
+				add_log("🆕 Đã bỏ checkpoint cũ và bắt đầu bản dịch mới.")
 		else:
-			with checkpoint_lock:
-				with open(cp_file, "w", encoding="utf-8") as f:
-					json.dump({}, f)
+			reset_checkpoint(cp_file, checkpoint_metadata)
 
 		progress_bar["maximum"] = total
 		pending_indices = [i for i in range(total) if results[i] is None]
 		progress_bar["value"] = total - len(pending_indices)
-		failed_records = load_failed_chunks(failed_file)
+		failed_records = load_current_failed_chunks(failed_file, chunks)
 		if failed_records:
 			add_log(f"⚠️ Phát hiện {len(failed_records)} chunk lỗi đã lưu. Các chunk chưa có checkpoint sẽ được dịch lại.")
 
@@ -2287,7 +2385,7 @@ def process_translation_logic():
 					final_text.append(fallback_warning)
 			f.write("\n\n".join(final_text))
 
-		failed_records = load_failed_chunks(failed_file)
+		failed_records = load_current_failed_chunks(failed_file, chunks)
 		failed_count = len(failed_records)
 		if failed_count:
 			history_status = "completed_with_failures"
@@ -2308,9 +2406,16 @@ def process_translation_logic():
 			except Exception as e:
 				add_log(f"⚠️ Upload Google Drive thất bại: {e}")
 
-		# Bỏ xóa file checkpoint để hỗ trợ dịch lại cục bộ (Partial Regenerate)
-		# if os.path.exists(cp_file):
-		# 	os.remove(cp_file)
+		if not failed_count:
+			# Keep editable chunk data separately; a completed job must never leave a
+			# .resume.json behind or prompt to resume on the next launch.
+			with checkpoint_lock:
+				write_checkpoint_data(get_translation_cache_path(in_file), checkpoint_metadata, {
+					str(index): translated for index, translated in enumerate(results)
+				})
+				if os.path.exists(cp_file):
+					os.remove(cp_file)
+			add_log("🧹 Đã xóa checkpoint resume sau khi dịch hoàn tất.")
 
 		total_time = time.time() - stats["start_time"]
 		add_log(f"🎊 HOÀN TẤT! Tổng thời gian: {format_time(total_time)}")
@@ -2958,16 +3063,24 @@ def load_and_preview_chunks():
 			else:
 				chunk_listbox.insert(tk.END, f"Chunk {i+1} ({len(chunk)} ký tự) - {first_line}")
 		
-		# Load translated chunks if exist
-		cp_file = get_checkpoint_path(input_file)
+		# Load an unfinished checkpoint, or the completed cache used by the editor.
+		storage_file = get_chunk_storage_path(input_file)
+		expected_metadata = build_checkpoint_metadata(
+			text, size_limit, chunk_split_mode_var.get(), len(previewed_chunks)
+		)
 		with checkpoint_lock:
-			if os.path.exists(cp_file):
+			if os.path.exists(storage_file):
 				try:
-					with open(cp_file, "r", encoding="utf-8") as f:
-						saved_data = json.load(f)
+					saved_metadata, saved_data = read_checkpoint_data(storage_file)
+					if checkpoint_matches(saved_metadata, expected_metadata):
 						for k, v in saved_data.items():
-							translated_preview_chunks[int(k)] = v
-				except Exception as e:
+							try:
+								translated_preview_chunks[int(k)] = v
+							except (TypeError, ValueError):
+								continue
+					else:
+						add_log("⚠️ Bỏ qua dữ liệu chunk cũ vì file nguồn hoặc cấu hình chia chunk đã thay đổi.")
+				except Exception:
 					pass
 
 		preview_info_var.set(f"Tổng số chunk: {len(previewed_chunks)} | Lỗi đã lưu: {len(failed_preview_chunks)}")
@@ -3149,9 +3262,19 @@ def open_regenerate_dialog():
 		
 		def run():
 			try:
+				input_file = input_path.get()
+				storage_file = get_chunk_storage_path(input_file)
+				if not os.path.exists(storage_file):
+					source_text = read_file_content_safely(input_file)
+					reset_checkpoint(
+						storage_file,
+						build_checkpoint_metadata(
+							source_text, int(chunk_size_var.get()), chunk_split_mode_var.get(), len(previewed_chunks)
+						),
+					)
 				_, result = translate_chunk(
-					model, full_prompt, chunk_text, index, get_checkpoint_path(input_path.get()),
-					temperature, max_tokens, failed_file=get_failed_chunks_path(input_path.get())
+					model, full_prompt, chunk_text, index, storage_file,
+					temperature, max_tokens, failed_file=get_failed_chunks_path(input_file)
 				)
 				
 				dialog.after(0, lambda: [
@@ -3176,20 +3299,21 @@ def open_regenerate_dialog():
 			
 		translated_preview_chunks[index] = new_trans
 		
-		cp_file = get_checkpoint_path(input_path.get())
+		input_file = input_path.get()
+		storage_file = get_chunk_storage_path(input_file)
 		with checkpoint_lock:
-			saved_data = {}
-			if os.path.exists(cp_file):
-				try:
-					with open(cp_file, "r", encoding="utf-8") as f:
-						saved_data = json.load(f)
-				except:
-					pass
-				
+			try:
+				metadata, saved_data = read_checkpoint_data(storage_file)
+			except Exception:
+				metadata, saved_data = {}, {}
+			if not metadata:
+				source_text = read_file_content_safely(input_file)
+				metadata = build_checkpoint_metadata(
+					source_text, int(chunk_size_var.get()), chunk_split_mode_var.get(), len(previewed_chunks)
+				)
 			saved_data[str(index)] = new_trans
-			with open(cp_file, "w", encoding="utf-8") as f:
-				json.dump(saved_data, f, ensure_ascii=False, indent=2)
-		clear_failed_chunk(get_failed_chunks_path(input_path.get()), index)
+			write_checkpoint_data(storage_file, metadata, saved_data)
+		clear_failed_chunk(get_failed_chunks_path(input_file), index)
 		failed_preview_chunks.pop(index, None)
 			
 		on_chunk_select(None)

@@ -116,8 +116,8 @@ def get_model_prices_usd_per_1m(model_id, input_tokens):
 	default_price = MODEL_PRICING.get("default", {"input_per_1m": 0.15, "output_per_1m": 0.30})
 	return default_price.get("input_per_1m", 0.15), default_price.get("output_per_1m", 0.30)
 
-# ================= CHẾ ĐỘ SÁNG/TỐI =================
 current_theme = "dark"
+# ================= CHẾ ĐỘ SÁNG/TỐI =================
 THEMES = {
 	"dark": {
 		"bg": "#0f172a",

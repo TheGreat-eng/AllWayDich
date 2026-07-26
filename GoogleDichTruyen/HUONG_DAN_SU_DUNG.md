@@ -72,7 +72,9 @@ Trong lúc dịch:
 - App tạo file checkpoint cạnh file input:
   - `tenfile.resume.json`
 - Mở lại app và chạy dịch, nếu có checkpoint app sẽ hỏi dịch tiếp.
-- Khi hoàn tất toàn bộ, checkpoint bị xóa.
+- Khi hoàn tất toàn bộ, checkpoint bị xóa tự động.
+- Để xem hoặc dịch lại từng đoạn sau khi hoàn tất, app dùng cache riêng
+  `tenfile.chunks.json`; file này không bao giờ được dùng để resume.
 
 ## 8) Ý nghĩa các tab
 - **🚀 Dịch truyện**: cấu hình + điều khiển chạy
@@ -83,7 +85,8 @@ Trong lúc dịch:
 ## 9) File dữ liệu app
 - `app_settings.json`: lưu cấu hình lần gần nhất
 - `translation_history.json`: lịch sử dịch
-- `*.resume.json`: checkpoint theo từng file truyện
+- `*.resume.json`: checkpoint tạm của bản dịch chưa hoàn tất
+- `*.chunks.json`: cache bản dịch hoàn tất để xem/chỉnh từng chunk
 
 ## 10) Lỗi thường gặp & cách xử lý
 ### Báo thiếu thư viện `google-genai`
