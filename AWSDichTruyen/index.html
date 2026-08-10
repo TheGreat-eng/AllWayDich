@@ -1,0 +1,1558 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWSDichTruyen 3D Studio - Frosted Glass Edition</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root {
+            /* Dark Theme Tokens (Default) */
+            --bg-body: #030712;
+            --glass-bg: rgba(15, 23, 42, 0.4);
+            --glass-card-bg: rgba(15, 23, 42, 0.55);
+            --glass-input-bg: rgba(3, 7, 18, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.24);
+            --glass-border-bright: rgba(255, 255, 255, 0.45);
+            --glass-hover: rgba(255, 255, 255, 0.16);
+            --accent-cyan: #38bdf8;
+            --accent-purple: #c084fc;
+            --accent-magenta: #f43f5e;
+            --accent-gold: #facc15;
+            --accent-green: #34d399;
+            --accent-red: #f87171;
+            --text-main: #ffffff;
+            --text-sub: #cbd5e1;
+            --font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        /* Light Theme Tokens */
+        body.light-theme {
+            --bg-body: #f8fafc;
+            --glass-bg: rgba(255, 255, 255, 0.75);
+            --glass-card-bg: rgba(255, 255, 255, 0.82);
+            --glass-input-bg: rgba(241, 245, 249, 0.9);
+            --glass-border: rgba(15, 23, 42, 0.18);
+            --glass-border-bright: rgba(15, 23, 42, 0.35);
+            --glass-hover: rgba(0, 0, 0, 0.08);
+            --accent-cyan: #0284c7;
+            --accent-purple: #7c3aed;
+            --accent-magenta: #e11d48;
+            --accent-gold: #d97706;
+            --accent-green: #059669;
+            --accent-red: #dc2626;
+            --text-main: #0f172a;
+            --text-sub: #334155;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-body);
+            font-family: var(--font-family);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            transition: background-color 0.4s ease, color 0.4s ease;
+        }
+
+        /* 3D Canvas Background */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* Main Floating Perspective Container */
+        #app-container {
+            position: relative;
+            z-index: 10;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            gap: 14px;
+            perspective: 1200px;
+            transition: opacity 0.5s ease;
+        }
+
+        /* Zen Mode - Hide UI Overlay */
+        #app-container.zen-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Floating Restore Button for Zen Mode */
+        #zen-restore-btn {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--accent-cyan);
+            color: #ffffff;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        #zen-restore-btn:hover {
+            transform: translateX(-50%) scale(1.06);
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+        }
+
+        /* Premium Header Navigation Bar */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--glass-bg);
+            backdrop-filter: blur(28px) saturate(210%);
+            -webkit-backdrop-filter: blur(28px) saturate(210%);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 10px 20px;
+            box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+            gap: 14px;
+            flex-wrap: wrap;
+            transition: all 0.3s ease;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-icon {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, #06b6d4, #a855f7, #ec4899);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: #ffffff;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.8);
+            animation: pulse-logo 3s infinite ease-in-out;
+        }
+
+        @keyframes pulse-logo {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(56, 189, 248, 0.6); }
+            50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(192, 132, 252, 0.9); }
+        }
+
+        .brand-title {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: 0.5px;
+        }
+
+        /* Navigation Glass Tabs */
+        .nav-tabs {
+            display: flex;
+            gap: 6px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 4px;
+            border-radius: 14px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .nav-tab {
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-sub);
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid transparent;
+        }
+
+        .nav-tab:hover {
+            color: var(--text-main);
+            background: var(--glass-hover);
+        }
+
+        .nav-tab.active {
+            color: #ffffff;
+            background: linear-gradient(135deg, #06b6d4, #a855f7);
+            font-weight: 700;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 18px rgba(56, 189, 248, 0.5);
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Header Control Panel (API Key & Model) */
+        .header-inputs {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.15);
+            backdrop-filter: blur(16px);
+            padding: 6px 12px;
+            border-radius: 14px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .header-input-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-input-label {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--accent-gold);
+            white-space: nowrap;
+        }
+
+        .custom-input-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .custom-input {
+            background: var(--glass-input-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            padding: 7px 32px 7px 12px;
+            color: var(--text-main);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            font-weight: 500;
+            outline: none;
+            transition: all 0.25s ease;
+            user-select: text;
+        }
+
+        .custom-input:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+        }
+
+        .input-icon-btn {
+            position: absolute;
+            right: 10px;
+            color: var(--text-sub);
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .custom-select {
+            background: var(--glass-input-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            padding: 7px 12px;
+            color: var(--text-main);
+            font-family: var(--font-family);
+            font-size: 0.85rem;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+            max-width: 240px;
+        }
+
+        .custom-select option {
+            background: #0f172a;
+            color: #ffffff;
+        }
+
+        /* Main View Container */
+        .main-content {
+            flex: 1;
+            display: flex;
+            gap: 14px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .tab-panel {
+            width: 100%;
+            height: 100%;
+            display: none;
+            gap: 14px;
+        }
+
+        .tab-panel.active {
+            display: flex;
+        }
+
+        /* Frosted Glass Card Styling */
+        .glass-card {
+            background: var(--glass-card-bg);
+            backdrop-filter: blur(24px) saturate(200%);
+            -webkit-backdrop-filter: blur(24px) saturate(200%);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .glass-card:hover {
+            border-color: var(--glass-border-bright);
+            box-shadow: 0 16px 50px 0 rgba(56, 189, 248, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .editor-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .column-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 6px;
+        }
+
+        .column-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-main);
+        }
+
+        .char-counter {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            background: rgba(0, 0, 0, 0.2);
+            padding: 4px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .editor-textarea {
+            flex: 1;
+            width: 100%;
+            background: var(--glass-input-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 16px;
+            color: var(--text-main);
+            font-family: var(--font-family);
+            font-size: 1rem;
+            line-height: 1.7;
+            resize: none;
+            outline: none;
+            transition: all 0.3s ease;
+            user-select: text;
+        }
+
+        .editor-textarea:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+        }
+
+        .control-toolbar {
+            width: 310px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            justify-content: center;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .input-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Vibrant Action Translate Button */
+        .btn-translate {
+            width: 100%;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            background: linear-gradient(135deg, #06b6d4, #a855f7, #ec4899);
+            background-size: 200% 200%;
+            animation: gradient-shift 6s ease infinite;
+            color: #ffffff;
+            font-family: var(--font-family);
+            font-size: 1.1rem;
+            font-weight: 800;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 6px 25px rgba(168, 85, 247, 0.6);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+        }
+
+        @keyframes gradient-shift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .btn-translate:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 10px 35px rgba(56, 189, 248, 0.8);
+        }
+
+        .btn-action-secondary {
+            padding: 8px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(255, 255, 255, 0.12);
+            color: var(--text-main);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.25s ease;
+        }
+
+        .btn-action-secondary:hover {
+            background: var(--glass-hover);
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+        }
+
+        .batch-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .file-select-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .file-card {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .file-path-display {
+            background: var(--glass-input-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-family: var(--font-mono);
+            font-size: 0.88rem;
+            color: var(--text-main);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .progress-card {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .progress-bar-wrapper {
+            width: 100%;
+            height: 16px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid var(--glass-border);
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #06b6d4, #a855f7, #ec4899);
+            border-radius: 10px;
+            transition: width 0.35s ease;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.8);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 12px;
+        }
+
+        .stat-box {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 12px 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.25s ease;
+        }
+
+        .stat-box:hover {
+            border-color: var(--accent-cyan);
+            transform: translateY(-2px);
+        }
+
+        .stat-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+
+        .log-console {
+            flex: 1;
+            background: var(--glass-input-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 14px;
+            font-family: var(--font-mono);
+            font-size: 0.88rem;
+            line-height: 1.6;
+            color: var(--text-main);
+            overflow-y: auto;
+            white-space: pre-wrap;
+            user-select: text;
+        }
+
+        .log-line-system { color: var(--text-main); font-weight: 600; }
+        .log-line-info { color: var(--accent-cyan); }
+        .log-line-success { color: var(--accent-green); font-weight: 600; }
+        .log-line-warn { color: var(--accent-gold); }
+        .log-line-error { color: var(--accent-red); font-weight: 700; }
+
+        .table-wrapper {
+            flex: 1;
+            overflow: auto;
+            border-radius: 14px;
+            border: 1px solid var(--glass-border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            text-align: left;
+        }
+
+        th {
+            background: var(--glass-card-bg);
+            padding: 12px;
+            color: var(--accent-cyan);
+            font-weight: 700;
+            position: sticky;
+            top: 0;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--glass-border);
+            color: var(--text-main);
+        }
+
+        tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        tr:hover {
+            background: rgba(56, 189, 248, 0.15);
+        }
+
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .toast {
+            background: var(--glass-card-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--accent-cyan);
+            color: var(--text-main);
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes slide-in {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 3D Canvas Background -->
+    <div id="canvas-container"></div>
+
+    <!-- Zen View Restoration Button -->
+    <div id="zen-restore-btn" onclick="toggleZenMode()">
+        <i class="fa-solid fa-eye"></i> <span>Hiện Giao Diện (ESC)</span>
+    </div>
+
+    <!-- Main Glassmorphism UI Overlay -->
+    <div id="app-container">
+        <!-- Header Navigation Bar -->
+        <header>
+            <div class="brand">
+                <div class="brand-icon"><i class="fa-solid fa-robot"></i></div>
+                <div class="brand-title">AWSDichTruyen 3D</div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <nav class="nav-tabs">
+                <div class="nav-tab active" onclick="switchTab('direct-tab')">
+                    <i class="fa-solid fa-bolt" style="color: var(--accent-cyan);"></i> Dịch Nhanh
+                </div>
+                <div class="nav-tab" onclick="switchTab('batch-tab')">
+                    <i class="fa-solid fa-file-invoice" style="color: var(--accent-purple);"></i> Dịch File Truyện
+                </div>
+                <div class="nav-tab" onclick="switchTab('preview-tab')">
+                    <i class="fa-solid fa-list-check" style="color: var(--accent-green);"></i> Xem Chunks
+                </div>
+                <div class="nav-tab" onclick="switchTab('settings-tab')">
+                    <i class="fa-solid fa-sliders" style="color: var(--accent-gold);"></i> Cài Đặt
+                </div>
+                <div class="nav-tab" onclick="switchTab('history-tab')">
+                    <i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-magenta);"></i> Lịch Sử
+                </div>
+            </nav>
+
+            <!-- Header Controls: API Key, Model Select & Zen Mode / Theme -->
+            <div class="header-inputs">
+                <div class="header-input-item">
+                    <span class="header-input-label"><i class="fa-solid fa-key"></i> API Key:</span>
+                    <div class="custom-input-box">
+                        <input type="password" id="header-api-key" class="custom-input" placeholder="ABSK... (nhập Key)" style="width: 190px;" onchange="syncApiKey(this.value)">
+                        <i class="fa-solid fa-eye input-icon-btn" onclick="toggleApiKeyVisibility('header-api-key', this)"></i>
+                    </div>
+                </div>
+
+                <div class="header-input-item">
+                    <span class="header-input-label" style="color: var(--accent-purple);"><i class="fa-solid fa-brain"></i> Model:</span>
+                    <select id="header-model-select" class="custom-select" onchange="onModelChange(this.value)"></select>
+                </div>
+
+                <!-- Theme Light/Dark Toggle & Zen Mode Toggle -->
+                <button class="btn-action-secondary" id="theme-toggle-btn" onclick="toggleTheme()" title="Chuyển chế độ Sáng / Tối">
+                    <i class="fa-solid fa-moon"></i> <span id="theme-btn-text">Tối</span>
+                </button>
+
+                <button class="btn-action-secondary" onclick="toggleZenMode()" title="Ẩn giao diện ngắm nền 3D">
+                    <i class="fa-solid fa-eye-slash"></i> <span>Ẩn UI</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main View Area -->
+        <div class="main-content">
+
+            <!-- TAB 1: DIRECT TEXT TRANSLATION -->
+            <div id="direct-tab" class="tab-panel active">
+                <!-- Left Column: Source Text -->
+                <div class="editor-column glass-card">
+                    <div class="column-header">
+                        <div class="column-title"><i class="fa-solid fa-file-pen" style="color: var(--accent-cyan);"></i> Văn Bản Gốc</div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button class="btn-action-secondary" onclick="pasteInputText()"><i class="fa-solid fa-paste"></i> Dán</button>
+                            <div class="char-counter" id="input-char-count">0 ký tự</div>
+                        </div>
+                    </div>
+                    <textarea id="source-text" class="editor-textarea" placeholder="Nhập hoặc dán nội dung văn bản / chương truyện gốc vào đây..." oninput="updateCharCount()"></textarea>
+                </div>
+
+                <!-- Middle Toolbar: Controls -->
+                <div class="control-toolbar glass-card">
+                    <div class="input-group">
+                        <label class="input-label"><i class="fa-solid fa-language" style="color: var(--accent-cyan);"></i> Ngôn Ngữ Đích</label>
+                        <select id="target-lang-select" class="custom-select" style="max-width: 100%;">
+                            <option value="Tiếng Việt (Thuần Việt)">Tiếng Việt (Thuần Việt)</option>
+                            <option value="Tiếng Anh">Tiếng Anh (English)</option>
+                            <option value="Tiếng Trung">Tiếng Trung (Simplified Chinese)</option>
+                            <option value="Tiếng Nhật">Tiếng Nhật (Japanese)</option>
+                        </select>
+                    </div>
+
+                    <button id="btn-translate-direct" class="btn-translate" onclick="handleDirectTranslate()">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> DỊCH VĂN BẢN
+                    </button>
+
+                    <div id="direct-translate-stats" style="display: none; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 12px; font-size: 0.85rem; border: 1px solid var(--glass-border);">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                            <span style="color: var(--text-main);">Tokens:</span>
+                            <span id="direct-tokens" style="color: var(--accent-cyan); font-family: var(--font-mono); font-weight: 700;">0 in / 0 out</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="color: var(--text-main);">Chi phí:</span>
+                            <span id="direct-cost" style="color: var(--accent-gold); font-family: var(--font-mono); font-weight: 700;">$0.0000 (0 đ)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Translated Text Output -->
+                <div class="editor-column glass-card">
+                    <div class="column-header">
+                        <div class="column-title"><i class="fa-solid fa-circle-check" style="color: var(--accent-green);"></i> Bản Dịch (Kết Quả)</div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button class="btn-action-secondary" onclick="copyOutputText()"><i class="fa-solid fa-copy"></i> Sao chép</button>
+                            <div class="char-counter" id="output-char-count">0 ký tự</div>
+                        </div>
+                    </div>
+                    <textarea id="target-text" class="editor-textarea" readonly placeholder="Kết quả dịch thuật sẽ xuất hiện ở đây..."></textarea>
+                </div>
+            </div>
+
+            <!-- TAB 2: BATCH FILE TRANSLATION -->
+            <div id="batch-tab" class="tab-panel">
+                <div class="batch-container glass-card">
+                    <div class="file-select-grid">
+                        <div class="file-card">
+                            <label class="input-label"><i class="fa-solid fa-file-import" style="color: var(--accent-cyan);"></i> File Đầu Vào (.txt)</label>
+                            <div style="display: flex; gap: 8px;">
+                                <div id="input-file-path" class="file-path-display" style="flex: 1;">Chưa chọn file...</div>
+                                <button class="btn-action-secondary" onclick="browseInputFile()"><i class="fa-solid fa-folder-open"></i> Chọn File</button>
+                            </div>
+                        </div>
+                        <div class="file-card">
+                            <label class="input-label"><i class="fa-solid fa-file-export" style="color: var(--accent-purple);"></i> File Đầu Ra (Tự Động Mặc Định)</label>
+                            <div style="display: flex; gap: 8px;">
+                                <div id="output-file-path" class="file-path-display" style="flex: 1;">Chưa thiết lập...</div>
+                                <button class="btn-action-secondary" onclick="browseOutputFile()"><i class="fa-solid fa-pen-to-square"></i> Đổi Đường Dẫn</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <button id="btn-start-batch" class="btn-translate" style="flex: 2;" onclick="startBatchTranslation()">
+                            <i class="fa-solid fa-play"></i> BẮT ĐẦU DỊCH BATCH FILE
+                        </button>
+                        <button id="btn-pause-batch" class="btn-action-secondary" style="flex: 1; padding: 14px;" disabled onclick="pauseBatchTranslation()">
+                            <i class="fa-solid fa-pause"></i> Tạm Dừng
+                        </button>
+                        <button id="btn-stop-batch" class="btn-action-secondary" style="flex: 1; padding: 14px; border-color: rgba(248, 113, 113, 0.6); color: var(--accent-red);" disabled onclick="stopBatchTranslation()">
+                            <i class="fa-solid fa-square"></i> Dừng Hẳn
+                        </button>
+                    </div>
+
+                    <div class="progress-card">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.88rem;">
+                            <span id="progress-status-label" style="font-weight: 700; color: var(--accent-cyan);">Tiến độ: 0/0 đoạn (0%)</span>
+                            <span id="progress-speed-label" style="color: var(--text-main); font-weight: 600;"><i class="fa-solid fa-rocket" style="color: var(--accent-red);"></i> 0 đoạn/phút</span>
+                        </div>
+                        <div class="progress-bar-wrapper">
+                            <div id="progress-bar-fill" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+
+                    <!-- 6 Frosted Glass Statistics Panels -->
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <span class="stat-label"><i class="fa-solid fa-clock"></i> Thời gian</span>
+                            <span id="stat-elapsed" class="stat-value">00:00</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label"><i class="fa-solid fa-hourglass-half"></i> Còn lại</span>
+                            <span id="stat-eta" class="stat-value">--:--</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label"><i class="fa-solid fa-font"></i> Ký tự</span>
+                            <span id="stat-chars" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label"><i class="fa-solid fa-coins"></i> Total Token</span>
+                            <span id="stat-tokens" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label"><i class="fa-solid fa-dollar-sign"></i> Chi Phí</span>
+                            <span id="stat-cost-usd" class="stat-value" style="color: var(--accent-gold);">$0.0000</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label"><i class="fa-solid fa-money-bill-wave"></i> Thành Tiền</span>
+                            <span id="stat-cost-vnd" class="stat-value" style="color: var(--accent-green);">0 đ</span>
+                        </div>
+                    </div>
+
+                    <div class="input-label"><i class="fa-solid fa-terminal" style="color: var(--accent-gold);"></i> Nhật Ký Tiến Trình (Real-time Console Log)</div>
+                    <div id="batch-log-console" class="log-console"><span class="log-line-system">[System] Sẵn sàng thực thi tiến trình dịch file.</span></div>
+                </div>
+            </div>
+
+            <!-- TAB 3: CHUNK PREVIEW -->
+            <div id="preview-tab" class="tab-panel">
+                <div class="glass-card" style="width: 100%; height: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <button class="btn-action-secondary" onclick="loadChunkPreviews()"><i class="fa-solid fa-rotate"></i> Phân Chia & Tải Chunks</button>
+                        <div id="chunk-total-count" style="font-size: 0.95rem; font-weight: 700; color: var(--accent-cyan);">Tổng số chunk: 0</div>
+                    </div>
+                    <div style="display: flex; gap: 14px; flex: 1; overflow: hidden; margin-top: 8px;">
+                        <div style="width: 320px; border-right: 1px solid var(--glass-border); overflow-y: auto; padding-right: 8px;" id="chunk-list-container">
+                            <div style="color: var(--text-main); font-size: 0.88rem; padding: 12px;">Vui lòng chọn file ở tab "Dịch File Truyện" và nhấn Tải Chunks.</div>
+                        </div>
+                        <textarea id="chunk-detail-view" class="editor-textarea" readonly placeholder="Nội dung chi tiết chunk sẽ hiển thị ở đây..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: SETTINGS -->
+            <div id="settings-tab" class="tab-panel">
+                <div class="glass-card" style="width: 100%; height: 100%; overflow-y: auto;">
+                    <div class="column-title"><i class="fa-solid fa-sliders" style="color: var(--accent-purple);"></i> Cấu Hình Tham Số AI & System Prompt</div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px;">
+                        <div class="input-group">
+                            <label class="input-label">Chunk Size (Độ dài tối đa 1 đoạn - Ký tự)</label>
+                            <input type="number" id="setting-chunk-size" class="custom-input" value="3000">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Max Output Tokens (Tối đa câu trả lời)</label>
+                            <input type="number" id="setting-max-tokens" class="custom-input" value="8192">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Temperature (0.0 - 1.0)</label>
+                            <input type="number" step="0.1" id="setting-temperature" class="custom-input" value="0.5">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Số Luồng Song Song (Threads)</label>
+                            <input type="number" id="setting-threads" class="custom-input" value="3">
+                        </div>
+                    </div>
+
+                    <div class="input-group" style="flex: 1; margin-top: 14px;">
+                        <label class="input-label"><i class="fa-solid fa-scroll" style="color: var(--accent-gold);"></i> System Prompt Mẫu Dịch Truyện</label>
+                        <textarea id="setting-prompt" class="editor-textarea" style="height: 220px;"></textarea>
+                    </div>
+
+                    <button class="btn-translate" style="margin-top: 14px; width: 230px;" onclick="saveCurrentSettings()">
+                        <i class="fa-solid fa-floppy-disk"></i> LƯU CÀI ĐẶT
+                    </button>
+                </div>
+            </div>
+
+            <!-- TAB 5: HISTORY & STATS -->
+            <div id="history-tab" class="tab-panel">
+                <div class="glass-card" style="width: 100%; height: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="column-title"><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-cyan);"></i> Lịch Sử Dịch & Chi Phí</div>
+                        <button class="btn-action-secondary" style="border-color: rgba(248, 113, 113, 0.6); color: var(--accent-red);" onclick="clearHistoryRecords()"><i class="fa-solid fa-trash"></i> Xóa Lịch Sử</button>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Thời gian</th>
+                                    <th>Trạng thái</th>
+                                    <th>Model</th>
+                                    <th>Tiến độ</th>
+                                    <th>Tokens (In/Out)</th>
+                                    <th>Chi phí (USD)</th>
+                                    <th>Chi phí (VNĐ)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body">
+                                <tr><td colspan="7" style="text-align: center; color: var(--text-main);">Chưa có lịch sử dịch nào.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- 3D Scene Script & Frontend JS -->
+    <script>
+        /* ================= 1. VIBRANT COSMIC NEBULA & 3D PLANET BACKGROUND ================= */
+        let scene, camera, renderer, starfield, planet, crystalShell, atmosphereHalo;
+        let mouseX = 0, mouseY = 0;
+
+        function init3DVibrantCosmos() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 15;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            const starGeometry = new THREE.BufferGeometry();
+            const starCount = 4200;
+            const starPositions = new Float32Array(starCount * 3);
+            const starColors = new Float32Array(starCount * 3);
+
+            const vibrantColors = [
+                new THREE.Color(0x38bdf8),
+                new THREE.Color(0xc084fc),
+                new THREE.Color(0xf43f5e),
+                new THREE.Color(0xfacc15),
+                new THREE.Color(0xffffff)
+            ];
+
+            for (let i = 0; i < starCount * 3; i += 3) {
+                starPositions[i] = (Math.random() - 0.5) * 220;
+                starPositions[i + 1] = (Math.random() - 0.5) * 220;
+                starPositions[i + 2] = (Math.random() - 0.5) * 220;
+
+                const col = vibrantColors[Math.floor(Math.random() * vibrantColors.length)];
+                starColors[i] = col.r;
+                starColors[i + 1] = col.g;
+                starColors[i + 2] = col.b;
+            }
+
+            starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+            starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+
+            const starMaterial = new THREE.PointsMaterial({
+                size: 0.95,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9
+            });
+
+            starfield = new THREE.Points(starGeometry, starMaterial);
+            scene.add(starfield);
+
+            const planetGeo = new THREE.SphereGeometry(3.6, 64, 64);
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            
+            const grad = ctx.createRadialGradient(512, 512, 50, 512, 512, 512);
+            grad.addColorStop(0, '#38bdf8');
+            grad.addColorStop(0.3, '#7e22ce');
+            grad.addColorStop(0.6, '#be185d');
+            grad.addColorStop(1, '#090d16');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 1024, 1024);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            for (let i = 0; i < 35; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.random() * 1024, Math.random() * 1024, Math.random() * 120 + 30, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const planetTexture = new THREE.CanvasTexture(canvas);
+            const planetMat = new THREE.MeshPhongMaterial({
+                map: planetTexture,
+                shininess: 70,
+                specular: 0x38bdf8
+            });
+
+            planet = new THREE.Mesh(planetGeo, planetMat);
+            planet.position.set(4.5, -0.5, -2);
+            scene.add(planet);
+
+            const crystalGeo = new THREE.IcosahedronGeometry(4.1, 2);
+            const crystalMat = new THREE.MeshBasicMaterial({
+                color: 0x38bdf8,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.25
+            });
+            crystalShell = new THREE.Mesh(crystalGeo, crystalMat);
+            planet.add(crystalShell);
+
+            const haloGeo = new THREE.SphereGeometry(4.4, 64, 64);
+            const haloMat = new THREE.MeshBasicMaterial({
+                color: 0xc084fc,
+                side: THREE.BackSide,
+                transparent: true,
+                opacity: 0.35
+            });
+            atmosphereHalo = new THREE.Mesh(haloGeo, haloMat);
+            planet.add(atmosphereHalo);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+            scene.add(ambientLight);
+
+            const cyanLight = new THREE.DirectionalLight(0x38bdf8, 3.0);
+            cyanLight.position.set(12, 12, 10);
+            scene.add(cyanLight);
+
+            const magentaLight = new THREE.PointLight(0xf43f5e, 3.5, 60);
+            magentaLight.position.set(-10, -8, 8);
+            scene.add(magentaLight);
+
+            document.addEventListener('mousemove', (e) => {
+                mouseX = (e.clientX - window.innerWidth / 2) * 0.0006;
+                mouseY = (e.clientY - window.innerHeight / 2) * 0.0006;
+            });
+
+            window.addEventListener('resize', onWindowResize);
+            animate3D();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+
+            if (starfield) starfield.rotation.y += 0.0004;
+            if (planet) {
+                planet.rotation.y += 0.0025;
+                planet.rotation.x += 0.0008;
+            }
+            if (crystalShell) {
+                crystalShell.rotation.y -= 0.003;
+                crystalShell.rotation.z += 0.001;
+            }
+
+            camera.position.x += (mouseX * 18 - camera.position.x) * 0.05;
+            camera.position.y += (-mouseY * 18 - camera.position.y) * 0.05;
+            camera.lookAt(scene.position);
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('DOMContentLoaded', init3DVibrantCosmos);
+
+
+        /* ================= 2. STATE, THEME & ZEN MODE ================= */
+        let appState = {
+            models: [],
+            settings: {},
+            history: [],
+            pricing: {},
+            usd_to_vnd: 25400,
+            inputFile: "",
+            outputFile: "",
+            isThemeLight: false,
+            isZenMode: false
+        };
+
+        function toggleTheme() {
+            appState.isThemeLight = !appState.isThemeLight;
+            const body = document.body;
+            const btnText = document.getElementById('theme-btn-text');
+            const btnIcon = document.querySelector('#theme-toggle-btn i');
+
+            if (appState.isThemeLight) {
+                body.classList.add('light-theme');
+                btnText.textContent = 'Sáng';
+                btnIcon.className = 'fa-solid fa-sun';
+                showToast('Đã chuyển sang Chế độ Sáng');
+            } else {
+                body.classList.remove('light-theme');
+                btnText.textContent = 'Tối';
+                btnIcon.className = 'fa-solid fa-moon';
+                showToast('Đã chuyển sang Chế độ Tối');
+            }
+        }
+
+        function toggleZenMode() {
+            appState.isZenMode = !appState.isZenMode;
+            const appContainer = document.getElementById('app-container');
+            const restoreBtn = document.getElementById('zen-restore-btn');
+
+            if (appState.isZenMode) {
+                appContainer.classList.add('zen-hidden');
+                restoreBtn.style.display = 'flex';
+                showToast('Đã ẩn giao diện (Chế độ ngắm 3D). Nhấn ESC để hiện lại.');
+            } else {
+                appContainer.classList.remove('zen-hidden');
+                restoreBtn.style.display = 'none';
+                showToast('Đã hiện lại giao diện');
+            }
+        }
+
+        // Global key shortcut for Zen mode (ESC key)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                toggleZenMode();
+            }
+        });
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+
+            const targetTab = Array.from(document.querySelectorAll('.nav-tab')).find(t => t.getAttribute('onclick').includes(tabId));
+            if (targetTab) targetTab.classList.add('active');
+
+            const targetPanel = document.getElementById(tabId);
+            if (targetPanel) targetPanel.classList.add('active');
+        }
+
+        function showToast(message, icon = 'fa-circle-check') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function syncApiKey(value) {
+            appState.settings.api_key = value;
+            const headerInput = document.getElementById('header-api-key');
+            if (headerInput && headerInput.value !== value) headerInput.value = value;
+        }
+
+        function onModelChange(value) {
+            appState.settings.model = value;
+            const headerSelect = document.getElementById('header-model-select');
+            if (headerSelect && headerSelect.value !== value) headerSelect.value = value;
+
+            // Re-generate default output path if input file is selected
+            if (appState.inputFile && window.pywebview) {
+                window.pywebview.api.generate_default_output_path(appState.inputFile, value).then(newPath => {
+                    if (newPath) {
+                        appState.outputFile = newPath;
+                        document.getElementById('output-file-path').textContent = newPath;
+                    }
+                });
+            }
+        }
+
+        function toggleApiKeyVisibility(inputId, eyeIcon) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                eyeIcon.classList.remove('fa-eye');
+                eyeIcon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                eyeIcon.classList.remove('fa-eye-slash');
+                eyeIcon.classList.add('fa-eye');
+            }
+        }
+
+        /* ================= 3. PYWEBVIEW BINDING ================= */
+        window.addEventListener('pywebviewready', function() {
+            if (window.pywebview && window.pywebview.api) {
+                window.pywebview.api.get_initial_data().then(data => {
+                    appState.models = data.models || [];
+                    appState.settings = data.settings || {};
+                    appState.history = data.history || [];
+                    appState.pricing = data.pricing || {};
+                    appState.usd_to_vnd = data.usd_to_vnd || 25400;
+
+                    populateModelDropdown();
+                    applySettingsToUI();
+                    renderHistoryTable();
+                });
+            }
+        });
+
+        window.onPyLog = function(msg) {
+            const consoleBox = document.getElementById('batch-log-console');
+            if (consoleBox) {
+                let formattedMsg = msg;
+                if (msg.includes('✅') || msg.includes('HOÀN TẤT')) {
+                    formattedMsg = `<span class="log-line-success">${msg}</span>`;
+                } else if (msg.includes('⚠️')) {
+                    formattedMsg = `<span class="log-line-warn">${msg}</span>`;
+                } else if (msg.includes('❌') || msg.includes('Lỗi')) {
+                    formattedMsg = `<span class="log-line-error">${msg}</span>`;
+                } else if (msg.includes('🚀') || msg.includes('⏳')) {
+                    formattedMsg = `<span class="log-line-info">${msg}</span>`;
+                } else {
+                    formattedMsg = `<span class="log-line-system">${msg}</span>`;
+                }
+
+                consoleBox.innerHTML += '<br>' + formattedMsg;
+                consoleBox.scrollTop = consoleBox.scrollHeight;
+            }
+        };
+
+        window.onPyProgress = function(data) {
+            if (!data) return;
+            const statusLabel = document.getElementById('progress-status-label');
+            const speedLabel = document.getElementById('progress-speed-label');
+            const barFill = document.getElementById('progress-bar-fill');
+
+            if (data.percentage !== undefined) {
+                barFill.style.width = data.percentage + '%';
+                statusLabel.textContent = `Tiến độ: ${data.chunks_done}/${data.total_chunks} đoạn (${data.percentage}%)`;
+            }
+
+            if (data.speed_cpm !== undefined) speedLabel.innerHTML = `<i class="fa-solid fa-rocket" style="color: var(--accent-red);"></i> ${data.speed_cpm} đoạn/phút`;
+
+            if (data.elapsed_seconds !== undefined) document.getElementById('stat-elapsed').textContent = formatSeconds(data.elapsed_seconds);
+            if (data.eta_seconds !== undefined) document.getElementById('stat-eta').textContent = formatSeconds(data.eta_seconds);
+            if (data.total_output_chars !== undefined) document.getElementById('stat-chars').textContent = data.total_output_chars.toLocaleString();
+            if (data.total_tokens !== undefined) document.getElementById('stat-tokens').textContent = data.total_tokens.toLocaleString();
+            if (data.total_cost_usd !== undefined) document.getElementById('stat-cost-usd').textContent = '$' + data.total_cost_usd.toFixed(4);
+            if (data.total_cost_vnd !== undefined) document.getElementById('stat-cost-vnd').textContent = data.total_cost_vnd.toLocaleString() + ' đ';
+
+            if (data.status === 'completed' || data.status === 'stopped' || data.status === 'error') {
+                document.getElementById('btn-start-batch').disabled = false;
+                document.getElementById('btn-pause-batch').disabled = true;
+                document.getElementById('btn-stop-batch').disabled = true;
+
+                if (window.pywebview) {
+                    window.pywebview.api.get_history().then(h => {
+                        appState.history = h;
+                        renderHistoryTable();
+                    });
+                }
+            }
+        };
+
+        function populateModelDropdown() {
+            const headerSelect = document.getElementById('header-model-select');
+            headerSelect.innerHTML = '';
+            appState.models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                headerSelect.appendChild(opt);
+            });
+            if (appState.settings.model) headerSelect.value = appState.settings.model;
+        }
+
+        function applySettingsToUI() {
+            const s = appState.settings;
+            if (s.api_key) document.getElementById('header-api-key').value = s.api_key;
+            if (s.prompt) document.getElementById('setting-prompt').value = s.prompt;
+            if (s.chunk_size) document.getElementById('setting-chunk-size').value = s.chunk_size;
+            if (s.max_output_tokens) document.getElementById('setting-max-tokens').value = s.max_output_tokens;
+            if (s.temperature) document.getElementById('setting-temperature').value = s.temperature;
+            if (s.threads) document.getElementById('setting-threads').value = s.threads;
+        }
+
+        function updateCharCount() {
+            const text = document.getElementById('source-text').value;
+            document.getElementById('input-char-count').textContent = text.length.toLocaleString() + ' ký tự';
+        }
+
+        async function pasteInputText() {
+            try {
+                const text = await navigator.clipboard.readText();
+                document.getElementById('source-text').value = text;
+                updateCharCount();
+                showToast('Đã dán văn bản từ clipboard!');
+            } catch (err) {
+                showToast('Không thể dán từ clipboard', 'fa-triangle-exclamation');
+            }
+        }
+
+        async function copyOutputText() {
+            const text = document.getElementById('target-text').value;
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('Đã sao chép bản dịch!');
+            } catch (err) {
+                showToast('Sao chép thất bại', 'fa-triangle-exclamation');
+            }
+        }
+
+        function handleDirectTranslate() {
+            const text = document.getElementById('source-text').value;
+            const apiKey = document.getElementById('header-api-key').value;
+            const model = document.getElementById('header-model-select').value;
+            const targetLang = document.getElementById('target-lang-select').value;
+            const prompt = document.getElementById('setting-prompt').value;
+            const temp = document.getElementById('setting-temperature').value;
+            const maxTokens = document.getElementById('setting-max-tokens').value;
+
+            if (!text.trim()) {
+                showToast('Vui lòng nhập văn bản cần dịch.', 'fa-circle-exclamation');
+                return;
+            }
+
+            if (!apiKey.trim()) {
+                showToast('Vui lòng nhập API Key AWS Bedrock ở thanh công cụ.', 'fa-circle-exclamation');
+                return;
+            }
+
+            const btn = document.getElementById('btn-translate-direct');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG DỊCH VĂN BẢN...';
+
+            if (window.pywebview && window.pywebview.api) {
+                window.pywebview.api.translate_text({
+                    text: text,
+                    api_key: apiKey,
+                    model: model,
+                    target_lang: targetLang,
+                    prompt: prompt,
+                    temperature: temp,
+                    max_tokens: maxTokens
+                }).then(res => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> DỊCH VĂN BẢN';
+
+                    if (res.success) {
+                        document.getElementById('target-text').value = res.translated_text;
+                        document.getElementById('output-char-count').textContent = res.output_chars.toLocaleString() + ' ký tự';
+                        
+                        document.getElementById('direct-translate-stats').style.display = 'block';
+                        document.getElementById('direct-tokens').textContent = `${res.input_tokens} in / ${res.output_tokens} out`;
+                        document.getElementById('direct-cost').textContent = `$${res.total_cost_usd} (${res.total_cost_vnd.toLocaleString()} đ)`;
+
+                        showToast('Hoàn tất dịch văn bản!');
+                    } else {
+                        showToast('Lỗi dịch: ' + res.error, 'fa-triangle-exclamation');
+                    }
+                }).catch(err => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> DỊCH VĂN BẢN';
+                    showToast('Lỗi API call: ' + err, 'fa-triangle-exclamation');
+                });
+            } else {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> DỊCH VĂN BẢN';
+                    showToast('Chế độ Demo (Cần pywebview backend)', 'fa-circle-info');
+                }, 1000);
+            }
+        }
+
+        function browseInputFile() {
+            const selectedModel = document.getElementById('header-model-select').value;
+            if (window.pywebview) {
+                window.pywebview.api.select_input_file(selectedModel).then(res => {
+                    if (res && res.input_file) {
+                        appState.inputFile = res.input_file;
+                        appState.outputFile = res.default_output_file;
+                        document.getElementById('input-file-path').textContent = res.input_file;
+                        document.getElementById('output-file-path').textContent = res.default_output_file;
+                    }
+                });
+            }
+        }
+
+        function browseOutputFile() {
+            if (window.pywebview) {
+                window.pywebview.api.select_output_file().then(path => {
+                    if (path) {
+                        appState.outputFile = path;
+                        document.getElementById('output-file-path').textContent = path;
+                    }
+                });
+            }
+        }
+
+        function startBatchTranslation() {
+            const apiKey = document.getElementById('header-api-key').value;
+            if (!appState.inputFile) {
+                showToast('Vui lòng chọn file truyện đầu vào.', 'fa-circle-exclamation');
+                return;
+            }
+            if (!apiKey) {
+                showToast('Vui lòng nhập API Key AWS Bedrock ở thanh trên cùng.', 'fa-circle-exclamation');
+                return;
+            }
+
+            document.getElementById('btn-start-batch').disabled = true;
+            document.getElementById('btn-pause-batch').disabled = false;
+            document.getElementById('btn-stop-batch').disabled = false;
+            document.getElementById('batch-log-console').innerHTML = '<span class="log-line-system">[System] Bắt đầu khởi chạy tiến trình dịch file...</span>';
+
+            if (window.pywebview) {
+                window.pywebview.api.start_file_translation({
+                    input_file: appState.inputFile,
+                    output_file: appState.outputFile,
+                    api_key: apiKey,
+                    model: document.getElementById('header-model-select').value,
+                    prompt: document.getElementById('setting-prompt').value,
+                    target_lang: document.getElementById('target-lang-select').value,
+                    threads: document.getElementById('setting-threads').value,
+                    chunk_size: document.getElementById('setting-chunk-size').value,
+                    max_tokens: document.getElementById('setting-max-tokens').value,
+                    temperature: document.getElementById('setting-temperature').value
+                });
+            }
+        }
+
+        function pauseBatchTranslation() {
+            if (window.pywebview) window.pywebview.api.pause_file_translation();
+        }
+
+        function stopBatchTranslation() {
+            if (window.pywebview) window.pywebview.api.stop_file_translation();
+        }
+
+        function loadChunkPreviews() {
+            if (!appState.inputFile) {
+                showToast('Vui lòng chọn file ở tab "Dịch File Truyện".', 'fa-circle-exclamation');
+                return;
+            }
+            const chunkSize = document.getElementById('setting-chunk-size').value;
+            if (window.pywebview) {
+                window.pywebview.api.preview_chunks(appState.inputFile, chunkSize).then(res => {
+                    if (res.success) {
+                        document.getElementById('chunk-total-count').textContent = `Tổng số chunk: ${res.total_chunks}`;
+                        const container = document.getElementById('chunk-list-container');
+                        container.innerHTML = '';
+                        res.chunks.forEach(c => {
+                            const item = document.createElement('div');
+                            item.style.padding = '10px 12px';
+                            item.style.marginBottom = '8px';
+                            item.style.borderRadius = '10px';
+                            item.style.background = 'var(--glass-bg)';
+                            item.style.border = '1px solid var(--glass-border)';
+                            item.style.cursor = 'pointer';
+                            item.style.fontSize = '0.88rem';
+                            item.innerHTML = `<strong style="color: var(--accent-cyan);">Chunk ${c.index}</strong> (${c.length} ký tự)<br><span style="color: var(--text-main); font-size: 0.8rem;">${c.summary}</span>`;
+                            item.onclick = () => {
+                                document.getElementById('chunk-detail-view').value = c.content;
+                            };
+                            container.appendChild(item);
+                        });
+                    }
+                });
+            }
+        }
+
+        function saveCurrentSettings() {
+            const settings = {
+                api_key: document.getElementById('header-api-key').value,
+                model: document.getElementById('header-model-select').value,
+                prompt: document.getElementById('setting-prompt').value,
+                chunk_size: document.getElementById('setting-chunk-size').value,
+                max_output_tokens: document.getElementById('setting-max-tokens').value,
+                temperature: document.getElementById('setting-temperature').value,
+                threads: document.getElementById('setting-threads').value,
+                input_file: appState.inputFile,
+                output_file: appState.outputFile
+            };
+            if (window.pywebview) {
+                window.pywebview.api.save_settings(settings).then(res => {
+                    if (res.success) showToast('Đã lưu toàn bộ cài đặt (API Key mã hóa)!');
+                });
+            }
+        }
+
+        function renderHistoryTable() {
+            const tbody = document.getElementById('history-table-body');
+            if (!appState.history || appState.history.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-main);">Chưa có lịch sử dịch nào.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = '';
+            appState.history.slice().reverse().forEach(item => {
+                const tr = document.createElement('tr');
+                const costUsd = item.total_cost_usd ? '$' + item.total_cost_usd.toFixed(4) : '$0.0000';
+                const costVnd = item.total_cost_vnd ? item.total_cost_vnd.toLocaleString() + ' đ' : '0 đ';
+                tr.innerHTML = `
+                    <td>${item.start_at || '--'}</td>
+                    <td><span style="color: ${item.status === 'completed' ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 700;">${(item.status || '').toUpperCase()}</span></td>
+                    <td>${item.model || '--'}</td>
+                    <td>${item.chunks_done || 0}/${item.total_chunks || 0}</td>
+                    <td style="font-family: var(--font-mono);">${(item.total_input_tokens || 0).toLocaleString()} / ${(item.total_output_tokens || 0).toLocaleString()}</td>
+                    <td style="font-family: var(--font-mono); color: var(--accent-gold); font-weight: 700;">${costUsd}</td>
+                    <td style="font-family: var(--font-mono); color: var(--accent-cyan); font-weight: 700;">${costVnd}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function clearHistoryRecords() {
+            if (confirm('Bạn có chắc muốn xóa toàn bộ lịch sử dịch?')) {
+                if (window.pywebview) {
+                    window.pywebview.api.clear_history().then(res => {
+                        if (res.success) {
+                            appState.history = [];
+                            renderHistoryTable();
+                            showToast('Đã xóa sạch lịch sử dịch');
+                        }
+                    });
+                }
+            }
+        }
+
+        function formatSeconds(secs) {
+            if (secs < 0 || isNaN(secs)) return '--:--';
+            const m = Math.floor(secs / 60);
+            const s = Math.floor(secs % 60);
+            return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+        }
+    </script>
+</body>
+</html>
