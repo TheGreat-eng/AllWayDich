@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AWSDichTruyen 3D Studio - Sci-Fi Crystal Core</title>
+    <title>AWSDichTruyen 3D Studio - Milky Way Space Edition</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -54,7 +54,7 @@
             --text-sub: #334155;
         }
 
-        /* Ultra-Translucent Sheer Glass Mode (Nhìn xuyên nền 3D cực rõ) */
+        /* Ultra-Translucent Sheer Glass Mode */
         body.ultra-translucent {
             --glass-bg: rgba(6, 12, 26, 0.18) !important;
             --glass-card-bg: rgba(8, 16, 32, 0.22) !important;
@@ -698,7 +698,7 @@
         <!-- Header Navigation Bar -->
         <header>
             <div class="brand">
-                <div class="brand-icon"><i class="fa-solid fa-atom"></i></div>
+                <div class="brand-icon"><i class="fa-solid fa-globe"></i></div>
                 <div class="brand-title">AWSDichTruyen 3D Studio</div>
             </div>
 
@@ -736,17 +736,14 @@
                     <select id="header-model-select" class="custom-select" onchange="onModelChange(this.value)"></select>
                 </div>
 
-                <!-- Chế Độ Mờ UI (Ultra-Translucent Glass Mode) -->
                 <button class="btn-action-secondary" id="translucent-toggle-btn" onclick="toggleGlassTranslucency()" title="Bật / Tắt Chế Độ Mờ UI để nhìn rõ nền 3D">
                     <i class="fa-solid fa-droplet"></i> <span id="translucent-btn-text">Mờ UI</span>
                 </button>
 
-                <!-- Theme Light/Dark Toggle -->
                 <button class="btn-action-secondary" id="theme-toggle-btn" onclick="toggleTheme()" title="Chuyển chế độ Sáng / Tối">
                     <i class="fa-solid fa-moon"></i> <span id="theme-btn-text">Tối</span>
                 </button>
 
-                <!-- Zen View Mode Toggle -->
                 <button class="btn-action-secondary" onclick="toggleZenMode()" title="Ẩn giao diện ngắm nền 3D">
                     <i class="fa-solid fa-eye-slash"></i> <span>Ẩn UI</span>
                 </button>
@@ -968,20 +965,136 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <!-- 3D REAL-TIME DEEP SPACE CRYSTAL NUCLEUS ENGINE -->
+    <!-- 3D HIGH-DENSITY MILKY WAY STARFIELD & PHOTOREALISTIC PLANET ENGINE -->
     <script>
         let scene, camera, renderer;
-        let crystalNucleus, innerGlowCore, wireframeExoCage, energyRings = [];
-        let deepStarfield, nebulaClouds = [];
+        let photorealisticPlanet, atmosphereHaloMesh, sunLight;
+        let fgStarPoints, midStarPoints, deepStarPoints, milkyWayPoints;
         let mouseX = 0, mouseY = 0;
         let clock = new THREE.Clock();
 
+        // 1. Texture Generators
+        function createGlowingStarTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            grad.addColorStop(0.25, 'rgba(220, 240, 255, 0.95)');
+            grad.addColorStop(0.6, 'rgba(56, 189, 248, 0.4)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createNebulaPuffTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            grad.addColorStop(0, 'rgba(168, 85, 247, 0.55)');
+            grad.addColorStop(0.35, 'rgba(56, 189, 248, 0.3)');
+            grad.addColorStop(0.7, 'rgba(236, 72, 153, 0.12)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 128, 128);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createProceduralPlanetTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            const baseGrad = ctx.createLinearGradient(0, 0, 0, 512);
+            baseGrad.addColorStop(0, '#040d1a');
+            baseGrad.addColorStop(0.2, '#0a2342');
+            baseGrad.addColorStop(0.5, '#0d3866');
+            baseGrad.addColorStop(0.8, '#0a2342');
+            baseGrad.addColorStop(1, '#040d1a');
+            ctx.fillStyle = baseGrad;
+            ctx.fillRect(0, 0, 1024, 512);
+
+            for (let i = 0; i < 200; i++) {
+                const x = Math.random() * 1024;
+                const y = Math.random() * 512;
+                const r = Math.random() * 100 + 20;
+
+                const blobGrad = ctx.createRadialGradient(x, y, 0, x, y, r);
+                const colType = Math.random();
+                if (colType < 0.35) {
+                    blobGrad.addColorStop(0, 'rgba(16, 185, 129, 0.45)');
+                    blobGrad.addColorStop(0.7, 'rgba(5, 150, 105, 0.2)');
+                } else if (colType < 0.65) {
+                    blobGrad.addColorStop(0, 'rgba(217, 119, 6, 0.4)');
+                    blobGrad.addColorStop(0.8, 'rgba(180, 83, 9, 0.15)');
+                } else {
+                    blobGrad.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+                    blobGrad.addColorStop(0.85, 'rgba(255, 255, 255, 0)');
+                }
+                blobGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+                ctx.fillStyle = blobGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const iceGradTop = ctx.createLinearGradient(0, 0, 0, 70);
+            iceGradTop.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+            iceGradTop.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = iceGradTop;
+            ctx.fillRect(0, 0, 1024, 70);
+
+            const iceGradBot = ctx.createLinearGradient(0, 442, 0, 512);
+            iceGradBot.addColorStop(0, 'rgba(255, 255, 255, 0)');
+            iceGradBot.addColorStop(1, 'rgba(255, 255, 255, 0.95)');
+            ctx.fillStyle = iceGradBot;
+            ctx.fillRect(0, 442, 1024, 70);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            return texture;
+        }
+
+        function createProceduralPlanetBumpMap() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(0, 0, 1024, 512);
+
+            for (let i = 0; i < 180; i++) {
+                const x = Math.random() * 1024;
+                const y = Math.random() * 512;
+                const r = Math.random() * 70 + 10;
+                const bumpGrad = ctx.createRadialGradient(x, y, 0, x, y, r);
+                bumpGrad.addColorStop(0, '#ffffff');
+                bumpGrad.addColorStop(0.7, '#a0a0a0');
+                bumpGrad.addColorStop(1, '#808080');
+                ctx.fillStyle = bumpGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            return texture;
+        }
+
+        /* 2. HIGH-DENSITY MILKY WAY & STARFIELD ENGINE */
         function initSciFiDeepSpaceEngine() {
             const container = document.getElementById('canvas-container');
-            
-            scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x02040a, 0.0012);
 
+            scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 0, 16);
 
@@ -989,131 +1102,206 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.25;
+            renderer.toneMappingExposure = 1.35;
             container.appendChild(renderer.domElement);
 
-            const starGeometry = new THREE.BufferGeometry();
-            const starCount = 5000;
-            const starPositions = new Float32Array(starCount * 3);
-            const starColors = new Float32Array(starCount * 3);
+            const starTexture = createGlowingStarTexture();
+            const nebulaTexture = createNebulaPuffTexture();
 
-            const starPalette = [
-                new THREE.Color(0x38bdf8),
-                new THREE.Color(0xc084fc),
-                new THREE.Color(0xf43f5e),
-                new THREE.Color(0x34d399),
-                new THREE.Color(0xffffff)
+            // Astronomical Spectral Palette (Class O/B, A/F, G, M)
+            const spectralColors = [
+                new THREE.Color(0x38bdf8), // Class O/B: Deep Cyan
+                new THREE.Color(0xe0f2fe), // Class A/F: White Cyan
+                new THREE.Color(0xfef08a), // Class G: Sun Yellow
+                new THREE.Color(0xf87171), // Class M: Orange Red
+                new THREE.Color(0xffffff)  // Pure White
             ];
 
-            for (let i = 0; i < starCount * 3; i += 3) {
-                starPositions[i] = (Math.random() - 0.5) * 260;
-                starPositions[i + 1] = (Math.random() - 0.5) * 260;
-                starPositions[i + 2] = (Math.random() - 0.5) * 260;
+            // 1. Group 1: Foreground Stars (500 stars, size 3.2, AdditiveBlending)
+            const fgGeo = new THREE.BufferGeometry();
+            const fgPos = new Float32Array(500 * 3);
+            const fgCol = new Float32Array(500 * 3);
+            for (let i = 0; i < 500; i++) {
+                fgPos[i * 3] = (Math.random() - 0.5) * 250;
+                fgPos[i * 3 + 1] = (Math.random() - 0.5) * 250;
+                fgPos[i * 3 + 2] = (Math.random() - 0.5) * 150 + 20;
 
-                const c = starPalette[Math.floor(Math.random() * starPalette.length)];
-                starColors[i] = c.r;
-                starColors[i + 1] = c.g;
-                starColors[i + 2] = c.b;
+                const c = spectralColors[Math.floor(Math.random() * spectralColors.length)];
+                fgCol[i * 3] = c.r;
+                fgCol[i * 3 + 1] = c.g;
+                fgCol[i * 3 + 2] = c.b;
             }
-
-            starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-            starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
-
-            const starMaterial = new THREE.PointsMaterial({
-                size: 0.9,
+            fgGeo.setAttribute('position', new THREE.BufferAttribute(fgPos, 3));
+            fgGeo.setAttribute('color', new THREE.BufferAttribute(fgCol, 3));
+            fgStarPoints = new THREE.Points(fgGeo, new THREE.PointsMaterial({
+                size: 3.2,
+                map: starTexture,
                 vertexColors: true,
                 transparent: true,
-                opacity: 0.95
-            });
+                opacity: 1.0,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            }));
+            scene.add(fgStarPoints);
 
-            deepStarfield = new THREE.Points(starGeometry, starMaterial);
-            scene.add(deepStarfield);
+            // 2. Group 2: Midground Stars (4,500 stars, size 1.6)
+            const midGeo = new THREE.BufferGeometry();
+            const midPos = new Float32Array(4500 * 3);
+            const midCol = new Float32Array(4500 * 3);
+            for (let i = 0; i < 4500; i++) {
+                midPos[i * 3] = (Math.random() - 0.5) * 400;
+                midPos[i * 3 + 1] = (Math.random() - 0.5) * 400;
+                midPos[i * 3 + 2] = (Math.random() - 0.5) * 300;
 
-            const nebulaColors = [0x38bdf8, 0x7c3aed, 0xe11d48, 0x0284c7];
-            for (let i = 0; i < 6; i++) {
-                const cloudGeo = new THREE.SphereGeometry(12 + Math.random() * 8, 32, 32);
-                const cloudMat = new THREE.MeshBasicMaterial({
-                    color: nebulaColors[i % nebulaColors.length],
-                    transparent: true,
-                    opacity: 0.08 + Math.random() * 0.06,
-                    wireframe: true
-                });
-                const cloud = new THREE.Mesh(cloudGeo, cloudMat);
-                cloud.position.set(
-                    (Math.random() - 0.5) * 80,
-                    (Math.random() - 0.5) * 80,
-                    -40 - Math.random() * 40
-                );
-                scene.add(cloud);
-                nebulaClouds.push(cloud);
+                const c = spectralColors[Math.floor(Math.random() * spectralColors.length)];
+                midCol[i * 3] = c.r;
+                midCol[i * 3 + 1] = c.g;
+                midCol[i * 3 + 2] = c.b;
+            }
+            midGeo.setAttribute('position', new THREE.BufferAttribute(midPos, 3));
+            midGeo.setAttribute('color', new THREE.BufferAttribute(midCol, 3));
+            midStarPoints = new THREE.Points(midGeo, new THREE.PointsMaterial({
+                size: 1.6,
+                map: starTexture,
+                vertexColors: true,
+                transparent: true,
+                opacity: 1.0,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            }));
+            scene.add(midStarPoints);
+
+            // 3. Group 3: Deep Space Stars (15,000 micro stars, size 0.8)
+            const deepGeo = new THREE.BufferGeometry();
+            const deepPos = new Float32Array(15000 * 3);
+            const deepCol = new Float32Array(15000 * 3);
+            for (let i = 0; i < 15000; i++) {
+                deepPos[i * 3] = (Math.random() - 0.5) * 500;
+                deepPos[i * 3 + 1] = (Math.random() - 0.5) * 500;
+                deepPos[i * 3 + 2] = -80 - Math.random() * 350;
+
+                const c = spectralColors[Math.floor(Math.random() * spectralColors.length)];
+                deepCol[i * 3] = c.r;
+                deepCol[i * 3 + 1] = c.g;
+                deepCol[i * 3 + 2] = c.b;
+            }
+            deepGeo.setAttribute('position', new THREE.BufferAttribute(deepPos, 3));
+            deepGeo.setAttribute('color', new THREE.BufferAttribute(deepCol, 3));
+            deepStarPoints = new THREE.Points(deepGeo, new THREE.PointsMaterial({
+                size: 0.8,
+                map: starTexture,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            }));
+            scene.add(deepStarPoints);
+
+            // 4. Milky Way Dust & Nebula Belt (2,500 large soft nebula particles at 45 degree tilt)
+            const mwGeo = new THREE.BufferGeometry();
+            const mwCount = 2500;
+            const mwPos = new Float32Array(mwCount * 3);
+            const mwCol = new Float32Array(mwCount * 3);
+
+            const milkyWayPalette = [
+                new THREE.Color(0x06b6d4), // Cyan
+                new THREE.Color(0xa855f7), // Purple
+                new THREE.Color(0xec4899), // Magenta
+                new THREE.Color(0x3b82f6)  // Royal Blue
+            ];
+
+            for (let i = 0; i < mwCount; i++) {
+                const dist = (Math.random() - 0.5) * 450;
+                const spread = (Math.random() - 0.5) * 90;
+                const depth = (Math.random() - 0.5) * 150 - 40;
+
+                // 45 degree rotation
+                const x = dist * Math.cos(Math.PI / 4) - spread * Math.sin(Math.PI / 4);
+                const y = dist * Math.sin(Math.PI / 4) + spread * Math.cos(Math.PI / 4);
+                const z = depth;
+
+                mwPos[i * 3] = x;
+                mwPos[i * 3 + 1] = y;
+                mwPos[i * 3 + 2] = z;
+
+                const c = milkyWayPalette[Math.floor(Math.random() * milkyWayPalette.length)];
+                mwCol[i * 3] = c.r;
+                mwCol[i * 3 + 1] = c.g;
+                mwCol[i * 3 + 2] = c.b;
             }
 
-            const crystalGroup = new THREE.Group();
-            crystalGroup.position.set(4.2, -0.8, -1.5);
+            mwGeo.setAttribute('position', new THREE.BufferAttribute(mwPos, 3));
+            mwGeo.setAttribute('color', new THREE.BufferAttribute(mwCol, 3));
 
-            const facetGeo = new THREE.IcosahedronGeometry(3.5, 1);
-            const facetMat = new THREE.MeshStandardMaterial({
-                color: 0x091428,
-                roughness: 0.18,
-                metalness: 0.85,
-                flatShading: true,
-                emissive: 0x0284c7,
-                emissiveIntensity: 0.25
-            });
-            crystalNucleus = new THREE.Mesh(facetGeo, facetMat);
-            crystalGroup.add(crystalNucleus);
-
-            const coreGeo = new THREE.IcosahedronGeometry(2.7, 2);
-            const coreMat = new THREE.MeshBasicMaterial({
-                color: 0x00f0ff,
+            milkyWayPoints = new THREE.Points(mwGeo, new THREE.PointsMaterial({
+                size: 22,
+                map: nebulaTexture,
+                vertexColors: true,
                 transparent: true,
-                opacity: 0.85,
-                wireframe: false
+                opacity: 0.12,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            }));
+            scene.add(milkyWayPoints);
+
+            // Photorealistic Planet
+            const planetGeo = new THREE.SphereGeometry(4.0, 64, 64);
+            const planetMap = createProceduralPlanetTexture();
+            const planetBump = createProceduralPlanetBumpMap();
+
+            const planetMat = new THREE.MeshPhysicalMaterial({
+                map: planetMap,
+                bumpMap: planetBump,
+                bumpScale: 0.08,
+                roughness: 0.7,
+                metalness: 0.1,
+                clearcoat: 0.1,
+                clearcoatRoughness: 0.4
             });
-            innerGlowCore = new THREE.Mesh(coreGeo, coreMat);
-            crystalGroup.add(innerGlowCore);
 
-            const cageGeo = new THREE.IcosahedronGeometry(3.75, 2);
-            const cageMat = new THREE.MeshBasicMaterial({
-                color: 0xc084fc,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.4
+            photorealisticPlanet = new THREE.Mesh(planetGeo, planetMat);
+            photorealisticPlanet.position.set(4.2, -0.6, -1.5);
+            photorealisticPlanet.rotation.z = 0.28;
+            scene.add(photorealisticPlanet);
+
+            // Atmosphere Fresnel Glow
+            const atmosphereShaderMat = new THREE.ShaderMaterial({
+                vertexShader: `
+                    varying vec3 vNormal;
+                    varying vec3 vPosition;
+                    void main() {
+                        vNormal = normalize(normalMatrix * normal);
+                        vPosition = (modelViewMatrix * vec4(position, 1.0)).xyz;
+                        gl_Position = projectionMatrix * vec4(vPosition, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    varying vec3 vNormal;
+                    varying vec3 vPosition;
+                    void main() {
+                        vec3 viewDir = normalize(-vPosition);
+                        float intensity = pow(0.68 - dot(vNormal, viewDir), 2.4);
+                        vec3 atmosphereColor = vec3(0.15, 0.65, 1.0);
+                        gl_FragColor = vec4(atmosphereColor, intensity * 0.85);
+                    }
+                `,
+                side: THREE.BackSide,
+                blending: THREE.AdditiveBlending,
+                transparent: true
             });
-            wireframeExoCage = new THREE.Mesh(cageGeo, cageMat);
-            crystalGroup.add(wireframeExoCage);
 
-            for (let r = 0; r < 2; r++) {
-                const ringGeo = new THREE.TorusGeometry(4.3 + r * 0.4, 0.03, 16, 100);
-                const ringMat = new THREE.MeshBasicMaterial({
-                    color: r === 0 ? 0x38bdf8 : 0xf43f5e,
-                    transparent: true,
-                    opacity: 0.6
-                });
-                const ring = new THREE.Mesh(ringGeo, ringMat);
-                ring.rotation.x = Math.PI / (2 + r);
-                ring.rotation.y = Math.PI / (3 * (r + 1));
-                crystalGroup.add(ring);
-                energyRings.push(ring);
-            }
+            const atmosphereGeo = new THREE.SphereGeometry(4.18, 64, 64);
+            atmosphereHaloMesh = new THREE.Mesh(atmosphereGeo, atmosphereShaderMat);
+            photorealisticPlanet.add(atmosphereHaloMesh);
 
-            scene.add(crystalGroup);
+            // Solar Lighting
+            sunLight = new THREE.DirectionalLight(0xffffff, 3.8);
+            sunLight.position.set(22, 12, 18);
+            scene.add(sunLight);
 
-            const ambientLight = new THREE.AmbientLight(0x0f172a, 1.5);
+            const ambientLight = new THREE.AmbientLight(0x0a1628, 0.25);
             scene.add(ambientLight);
-
-            const keyLight = new THREE.DirectionalLight(0x38bdf8, 4.0);
-            keyLight.position.set(16, 14, 12);
-            scene.add(keyLight);
-
-            const purpleLight = new THREE.PointLight(0xc084fc, 4.5, 50);
-            purpleLight.position.set(-12, -8, 6);
-            scene.add(purpleLight);
-
-            const rimLight = new THREE.SpotLight(0xf43f5e, 6.0);
-            rimLight.position.set(0, 5, -15);
-            rimLight.lookAt(crystalGroup.position);
-            scene.add(rimLight);
 
             document.addEventListener('mousemove', (e) => {
                 mouseX = (e.clientX - window.innerWidth / 2) * 0.0006;
@@ -1134,30 +1322,30 @@
             requestAnimationFrame(animateDeepSpace);
             const elapsedTime = clock.getElapsedTime();
 
-            if (crystalNucleus) {
-                crystalNucleus.rotation.y += 0.004;
-                crystalNucleus.rotation.x += 0.002;
-            }
-            if (innerGlowCore) {
-                innerGlowCore.rotation.y -= 0.006;
-                const pulse = 0.75 + Math.sin(elapsedTime * 2.5) * 0.2;
-                innerGlowCore.material.opacity = pulse;
-            }
-            if (wireframeExoCage) {
-                wireframeExoCage.rotation.y -= 0.002;
-                wireframeExoCage.rotation.z += 0.001;
+            // Rotate Planet
+            if (photorealisticPlanet) {
+                photorealisticPlanet.rotation.y += 0.0012;
             }
 
-            energyRings.forEach((ring, idx) => {
-                ring.rotation.z += 0.005 * (idx + 1);
-                ring.rotation.x += 0.002 * (idx + 1);
-            });
+            // Real-Time Sinusoidal Star Twinkling Animation
+            if (fgStarPoints) {
+                fgStarPoints.rotation.y += 0.0005;
+                fgStarPoints.material.opacity = 0.85 + Math.sin(elapsedTime * 3.5) * 0.15;
+            }
+            if (midStarPoints) {
+                midStarPoints.rotation.y += 0.0003;
+                midStarPoints.material.opacity = 0.8 + Math.cos(elapsedTime * 2.2) * 0.2;
+            }
+            if (deepStarPoints) {
+                deepStarPoints.rotation.y += 0.0001;
+            }
 
-            if (deepStarfield) deepStarfield.rotation.y += 0.0003;
-            nebulaClouds.forEach((cloud, idx) => {
-                cloud.rotation.y += 0.0005 * (idx % 2 === 0 ? 1 : -1);
-            });
+            // Milky Way Dust Belt Subtle Drift
+            if (milkyWayPoints) {
+                milkyWayPoints.rotation.z += 0.00015;
+            }
 
+            // Smooth Camera Parallax Motion
             camera.position.x += (mouseX * 18 - camera.position.x) * 0.05;
             camera.position.y += (-mouseY * 18 - camera.position.y) * 0.05;
             camera.lookAt(scene.position);
@@ -1168,7 +1356,7 @@
         window.addEventListener('DOMContentLoaded', initSciFiDeepSpaceEngine);
 
 
-        /* ================= STATE, THEME, TRANSLUCENCY & ZEN MODE ================= */
+        /* STATE, THEME, TRANSLUCENCY & ZEN MODE */
         let appState = {
             models: [],
             settings: {},
@@ -1228,7 +1416,7 @@
             if (appState.isZenMode) {
                 appContainer.classList.add('zen-hidden');
                 restoreBtn.style.display = 'flex';
-                showToast('Đã kích hoạt Chế độ Ngắm 3D Crystal Core (ESC)');
+                showToast('Đã kích hoạt Chế độ Ngắm Dải Ngân Hà 3D (ESC)');
             } else {
                 appContainer.classList.remove('zen-hidden');
                 restoreBtn.style.display = 'none';
