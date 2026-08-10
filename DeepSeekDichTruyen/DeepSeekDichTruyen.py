@@ -62,6 +62,7 @@ DEFAULT_GLOSSARY = ""
 
 
 # ================= BIẾN ĐIỀU KHIỂN TẠM DỪNG =================
+active_webview_window = None
 is_paused = False
 is_stopped = False
 pause_event = threading.Event()
@@ -667,6 +668,22 @@ def add_log(message):
 		try:
 			if "root" in globals() and root.winfo_exists():
 				root.after(0, _append_to_log_box)
+		except Exception:
+			pass
+
+	if "active_webview_window" in globals() and active_webview_window:
+		level = "info"
+		if "❌" in message or "LỖI" in message or "thất bại" in message.lower():
+			level = "error"
+		elif "⚠️" in message or "Cảnh báo" in message:
+			level = "warn"
+		elif "✅" in message or "Hoàn tất" in message.lower() or "thành công" in message.lower():
+			level = "success"
+		try:
+			msg_json = json.dumps(message)
+			lvl_json = json.dumps(level)
+			js_code = f"if (window.onPyEvent) window.onPyEvent('append_log', {{'message': {msg_json}, 'level': {lvl_json}}});"
+			active_webview_window.evaluate_js(js_code)
 		except Exception:
 			pass
 
@@ -1378,10 +1395,10 @@ def apply_theme():
 	if "requests_hint_label" in globals():
 		requests_hint_label.configure(bg=PALETTE["panel"], fg="#000000")
 
-	main_container.configure(bg=PALETTE["bg"])
-	main_frame.configure(bg=PALETTE["bg"])
-	header.configure(bg=PALETTE["bg"])
-	badge_row.configure(bg=PALETTE["bg"])
+	if "badge_row" in globals():
+		badge_row.configure(bg=PALETTE["bg"])
+	if "btn_header_row" in globals():
+		btn_header_row.configure(bg=PALETTE["bg"])
 
 	for widget in main_container.winfo_children():
 		update_widget_colors(widget)
@@ -1740,7 +1757,15 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			stats["total_output_cost_usd"] += output_cost
 			stats["total_cost_usd"] = stats["total_input_cost_usd"] + stats["total_output_cost_usd"]
 
-
+			if "active_webview_window" in globals() and active_webview_window and stats.get("total_chunks", 0) > 0:
+				current_val = stats["chunks_done"]
+				total = stats["total_chunks"]
+				percent = int((current_val / total) * 100)
+				try:
+					js_code = f"if (window.onPyEvent) window.onPyEvent('update_progress', {{'done': {current_val}, 'total': {total}, 'percent': {percent}}});"
+					active_webview_window.evaluate_js(js_code)
+				except Exception:
+					pass
 
 			add_log(f"✅ Hoàn thành đoạn {index + 1}")
 			return index, translated_text
@@ -2042,8 +2067,28 @@ def start_translation():
 
 
 def stats_update_loop():
-	while not is_stopped and btn_start["state"] == "disabled":
+	while not is_stopped and (("btn_start" in globals() and btn_start["state"] == "disabled") or ("active_webview_window" in globals() and active_webview_window is not None)):
 		update_stats_display()
+		if "active_webview_window" in globals() and active_webview_window and stats.get("start_time", 0) > 0:
+			elapsed_sec = time.time() - stats["start_time"]
+			elapsed_str = format_time(elapsed_sec)
+			speed = int(stats["total_input_chars"] / elapsed_sec) if elapsed_sec > 0 else 0
+			chars_str = f"{stats['total_input_chars']:,} → {stats['total_output_chars']:,}"
+			tokens_str = f"{stats['total_input_tokens']:,} / {stats['total_output_tokens']:,}"
+			cost_usd = stats["total_cost_usd"]
+
+			js_data = {
+				"elapsed": elapsed_str,
+				"speed": speed,
+				"chars": chars_str,
+				"tokens": tokens_str,
+				"cost_usd": cost_usd
+			}
+			try:
+				js_code = f"if (window.onPyEvent) window.onPyEvent('update_stats', {json.dumps(js_data)});"
+				active_webview_window.evaluate_js(js_code)
+			except Exception:
+				pass
 		time.sleep(1)
 
 
@@ -2283,6 +2328,18 @@ def process_translation_logic():
 		btn_stop.config(state="disabled")
 		status_var.set("Sẵn sàng")
 		is_stopped = True
+
+		if "active_webview_window" in globals() and active_webview_window:
+			try:
+				if history_status == "completed":
+					js_code = f"if (window.onPyEvent) window.onPyEvent('translation_complete', {{'message': {json.dumps(completion_message)}, 'history': {json.dumps(history_entry)}}});"
+				elif history_status == "stopped":
+					js_code = "if (window.onPyEvent) window.onPyEvent('translation_stopped', {});"
+				else:
+					js_code = f"if (window.onPyEvent) window.onPyEvent('translation_error', {{'error': {json.dumps(history_error)}}});"
+				active_webview_window.evaluate_js(js_code)
+			except Exception:
+				pass
 
 
 
@@ -2540,46 +2597,88 @@ header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
 header_top = tk.Frame(header, bg=PALETTE["bg"])
 header_top.pack(fill="x")
 
-header_title_frame = tk.Frame(header_top, bg=PALETTE["bg"])
-header_title_frame.pack(side="left", fill="both", expand=True)
+header_canvas = tk.Canvas(header_top, height=85, bg=PALETTE["panel"], highlightthickness=1, highlightbackground=PALETTE["border"])
+header_canvas.pack(fill="x", pady=(0, 6))
 
-ttk.Label(header_title_frame, text="App Dịch Truyện – DeepSeek", style="Header.TLabel").pack(anchor="w")
-ttk.Label(
-	header_title_frame,
-	text="Trải nghiệm dịch mượt, rõ ràng và có thể resume bất cứ lúc nào.",
-	style="SubHeader.TLabel",
-).pack(anchor="w", pady=(4, 6))
+def draw_3d_header_banner(event=None):
+	header_canvas.delete("all")
+	w = max(header_canvas.winfo_width(), 1)
+	h = max(header_canvas.winfo_height(), 1)
+
+	is_light = current_theme == "light"
+	start_color = (248, 250, 252) if is_light else (9, 13, 22)
+	end_color = (226, 232, 240) if is_light else (25, 35, 55)
+
+	for i in range(h):
+		ratio = i / h
+		r = int(start_color[0] + ratio * (end_color[0] - start_color[0]))
+		g = int(start_color[1] + ratio * (end_color[1] - start_color[1]))
+		b = int(start_color[2] + ratio * (end_color[2] - start_color[2]))
+		header_canvas.create_line(0, i, w, i, fill=f"#{r:02x}{g:02x}{b:02x}")
+
+	bx, by = 45, 42
+	header_canvas.create_polygon([bx-25, by-15, bx-25, by+15, bx-20, by+20, bx-20, by-10], fill="#fbbf24", outline="#d97706")
+	header_canvas.create_polygon([bx-20, by-10, bx+15, by-25, bx+25, by-18, bx-10, by-3], fill="#0284c7" if is_light else "#00f2fe", outline="#38bdf8")
+	header_canvas.create_polygon([bx-20, by+20, bx+15, by+5, bx+25, by+12, bx-10, by+27], fill="#0369a1", outline="#0284c7")
+	header_canvas.create_polygon([bx+15, by-25, bx+20, by-22, bx+20, by+8, bx+15, by+5], fill="#ffffff", outline="#cbd5e1")
+	header_canvas.create_oval(bx-35, by-35, bx+35, by+35, outline="#0284c7" if is_light else "#00f2fe", width=1)
+
+	header_canvas.create_text(95, 28, text="📖 DỊCH TRUYỆN 3D STUDIO", fill="#0284c7" if is_light else "#00f2fe", font=("Segoe UI", 16, "bold"), anchor="w")
+	header_canvas.create_text(95, 52, text="Powered by DeepSeek AI — Giao diện 3D Hologram & Resume dịch thuật ngầm", fill="#475569" if is_light else "#94a3b8", font=("Segoe UI", 10), anchor="w")
+
+
+header_canvas.bind("<Configure>", draw_3d_header_banner)
+
+btn_header_row = tk.Frame(header, bg=PALETTE["bg"])
+btn_header_row.pack(fill="x", pady=(4, 0))
+
+def launch_3d_webview():
+	global active_webview_window
+	try:
+		import webview
+		html_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "web_ui", "index.html"))
+		bridge = DeepSeekBridge()
+		active_webview_window = webview.create_window(
+			"DeepSeek Dịch Truyện 3D Studio",
+			url=html_path,
+			js_api=bridge,
+			width=1280,
+			height=900,
+			min_size=(900, 650)
+		)
+		threading.Thread(target=webview.start, daemon=True).start()
+		add_log("✨ Đã mở Giao Diện 3D Webview Studio!")
+	except Exception as e:
+		messagebox.showerror("Lỗi Webview 3D", f"Không thể mở Webview 3D: {e}")
+
+btn_3d_web = tk.Button(
+	btn_header_row,
+	text="✨ MỞ GIAO DIỆN 3D WEBVIEW STUDIO",
+	font=("Segoe UI", 10, "bold"),
+	bg="#00f2fe",
+	fg="#070a12",
+	bd=0,
+	padx=16,
+	pady=6,
+	command=launch_3d_webview,
+	cursor="hand2",
+)
+btn_3d_web.pack(side="left", padx=(0, 10))
 
 btn_theme = tk.Button(
-	header_top,
+	btn_header_row,
 	text="🌙 Tối",
-	font=("Segoe UI", 10, "bold"),
+	font=("Segoe UI", 9, "bold"),
 	bg=PALETTE["accent_alt"],
 	fg="#0b0f19",
 	bd=0,
-	padx=15,
-	pady=8,
+	padx=12,
+	pady=6,
 	command=toggle_theme,
 	cursor="hand2",
 )
-btn_theme.pack(side="right", padx=(10, 0))
+btn_theme.pack(side="right")
 
-badge_row = tk.Frame(header, bg=PALETTE["bg"])
-badge_row.pack(anchor="w", pady=(4, 0))
-for text, color in [
-	("DeepSeek API", PALETTE["accent"]),
-	("Flash + Pro Models", PALETTE["accent_alt"]),
-]:
-	tk.Label(
-		badge_row,
-		text=text,
-		bg=color,
-		fg="#0b0f19",
-		font=("Segoe UI", 9, "bold"),
-		padx=10,
-		pady=4,
-		bd=0,
-	).pack(side="left", padx=(0, 8))
 
 
 def build_card(parent, title, col, row, colspan=1, rowspan=1):
@@ -4140,4 +4239,195 @@ try:
 except NameError:
 	pass
 
-root.mainloop()
+# ================= PYWEBVIEW 3D GUI LAUNCHER =================
+class DeepSeekBridge:
+	def get_initial_data(self):
+		settings = load_settings()
+		history = load_translation_history()
+		api_key_profiles = list(settings.get("api_keys", {}).keys())
+		prompt_profiles = list(settings.get("prompts", {}).keys())
+		active_api_key_name = settings.get("active_api_key", "Mặc định")
+		active_api_key_val = decrypt_api_key(settings.get("api_keys", {}).get(active_api_key_name, ""))
+		active_prompt_name = settings.get("active_prompt", "Mặc định")
+		active_prompt_text = settings.get("prompts", {}).get(active_prompt_name, DEFAULT_PROMPT)
+
+		return {
+			"settings": settings,
+			"history": history,
+			"api_key_profiles": api_key_profiles,
+			"prompt_profiles": prompt_profiles,
+			"active_api_key_name": active_api_key_name,
+			"active_api_key_value": active_api_key_val,
+			"active_prompt_name": active_prompt_name,
+			"active_prompt_text": active_prompt_text
+		}
+
+	def select_file(self, target):
+		def _pick():
+			if target == "input":
+				file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+			else:
+				file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+
+			if file_path and active_webview_window:
+				escaped_path = file_path.replace("\\", "/")
+				js_code = f"if (window.onPyEvent) window.onPyEvent('file_selected', {{'target': '{target}', 'path': {json.dumps(escaped_path)}}});"
+				active_webview_window.evaluate_js(js_code)
+
+		threading.Thread(target=_pick, daemon=True).start()
+
+	def build_output_path(self, input_file):
+		out_p = build_default_output_path(input_file, model_var.get() if 'model_var' in globals() else 'deepseek-v4-flash')
+		if active_webview_window:
+			escaped_path = out_p.replace("\\", "/")
+			js_code = f"if (window.onPyEvent) window.onPyEvent('file_selected', {{'target': 'output', 'path': {json.dumps(escaped_path)}}});"
+			active_webview_window.evaluate_js(js_code)
+		return out_p
+
+	def start_translation(self, params):
+		global is_stopped, is_paused
+		if 'input_path' in globals():
+			input_path.set(params.get("input_path", ""))
+		if 'output_path' in globals():
+			output_path.set(params.get("output_path", ""))
+		if 'model_var' in globals():
+			model_var.set(params.get("model", "deepseek-v4-flash"))
+		if 'thinking_level_var' in globals():
+			thinking_level_var.set(params.get("thinking_level", "disabled"))
+		if 'model_fallback_order_var' in globals():
+			model_fallback_order_var.set(params.get("fallback_order", ""))
+		if 'temp_var' in globals():
+			temp_var.set(str(params.get("temperature", 0.3)))
+		if 'thread_var' in globals():
+			thread_var.set(str(params.get("threads", 5)))
+		if 'chunk_size_var' in globals():
+			chunk_size_var.set(str(params.get("chunk_size", 4000)))
+		if 'max_output_tokens_var' in globals():
+			max_output_tokens_var.set(str(params.get("max_tokens", 8192)))
+		if 'chunk_split_mode_var' in globals():
+			chunk_split_mode_var.set(params.get("split_mode", "keyword"))
+
+		if 'prompt_text' in globals():
+			prompt_text.delete("1.0", tk.END)
+			prompt_text.insert(tk.END, params.get("prompt", DEFAULT_PROMPT))
+		if 'glossary_text' in globals():
+			glossary_text.delete("1.0", tk.END)
+			glossary_text.insert(tk.END, params.get("glossary", ""))
+
+		if 'api_key_entry' in globals():
+			api_key_entry.delete(0, tk.END)
+			api_key_entry.insert(0, params.get("api_key", ""))
+
+		if 'drive_upload_var' in globals():
+			drive_upload_var.set(params.get("drive_upload", False))
+		if 'drive_credentials_path_var' in globals():
+			drive_credentials_path_var.set(params.get("drive_credentials", ""))
+		if 'drive_folder_id_var' in globals():
+			drive_folder_id_var.set(params.get("drive_folder_id", ""))
+
+		start_translation()
+		return {"success": True}
+
+	def toggle_pause(self):
+		toggle_pause()
+		return is_paused
+
+	def stop_translation(self):
+		global is_stopped, is_paused
+		is_stopped = True
+		is_paused = False
+		pause_event.set()
+		add_log("🛑 Đang dừng quá trình dịch...")
+		return {"stopped": True}
+
+	def translate_quick(self, input_text, model_id):
+		temp = float(temp_var.get()) if 'temp_var' in globals() else 0.3
+		max_tok = int(max_output_tokens_var.get()) if 'max_output_tokens_var' in globals() else 8192
+		prompt = prompt_text.get("1.0", tk.END).strip() if 'prompt_text' in globals() else DEFAULT_PROMPT
+		glossary_raw = glossary_text.get("1.0", tk.END).strip() if 'glossary_text' in globals() else ""
+		glossary_entries = parse_glossary(glossary_raw)
+		final_prompt = build_prompt_with_glossary(prompt, glossary_entries)
+
+		result, input_tokens, output_tokens, error_code, _, _ = translate_with_deepseek(
+			model_id, final_prompt, input_text, temp, max_tok
+		)
+		return {
+			"result": result,
+			"input_tokens": input_tokens,
+			"output_tokens": output_tokens,
+			"error": error_code
+		}
+
+	def run_glossary_scan(self, char_limit, model_id):
+		if 'scan_char_limit_var' in globals():
+			scan_char_limit_var.set(str(char_limit))
+		if 'model_var' in globals():
+			model_var.set(model_id)
+		scan_story()
+		return {"started": True}
+
+	def save_glossary(self, text):
+		if 'glossary_text' in globals():
+			glossary_text.delete("1.0", tk.END)
+			glossary_text.insert(tk.END, text)
+		save_settings()
+		return {"saved": True}
+
+	def test_api_key(self, api_key, base_url):
+		try:
+			req = urllib.request.Request(
+				url=f"{base_url.rstrip('/')}/chat/completions",
+				data=json.dumps({
+					"model": "deepseek-chat",
+					"messages": [{"role": "user", "content": "hi"}],
+					"max_tokens": 1
+				}).encode("utf-8"),
+				headers={
+					"Content-Type": "application/json",
+					"Authorization": f"Bearer {api_key}"
+				},
+				method="POST"
+			)
+			with urllib.request.urlopen(req, timeout=10) as resp:
+				if resp.status == 200:
+					return {"success": True}
+		except Exception as e:
+			return {"success": False, "error": str(e)[:150]}
+		return {"success": False, "error": "Lỗi kết nối không xác định"}
+
+	def get_diff_content(self, input_file, output_file):
+		orig = read_file_content_safely(input_file) if os.path.exists(input_file) else ""
+		trans = read_file_content_safely(output_file) if os.path.exists(output_file) else ""
+		return {"original": orig, "translated": trans}
+
+	def open_file_external(self, path):
+		if os.path.exists(path):
+			os.startfile(path)
+		return {"opened": True}
+
+import sys
+
+use_classic = "--classic" in sys.argv
+
+try:
+	import webview
+	has_webview = True
+except ImportError:
+	has_webview = False
+
+if has_webview and not use_classic:
+	root.withdraw()
+	html_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "web_ui", "index.html"))
+	bridge = DeepSeekBridge()
+	active_webview_window = webview.create_window(
+		"DeepSeek Dịch Truyện 3D Studio",
+		url=html_path,
+		js_api=bridge,
+		width=1280,
+		height=900,
+		min_size=(900, 650)
+	)
+	webview.start()
+else:
+    root.deiconify()
+    root.mainloop()

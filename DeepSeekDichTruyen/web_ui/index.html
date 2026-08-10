@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepSeek Dịch Truyện 3D Studio</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="lib/three.min.js"></script>
+</head>
+<body class="dark-theme">
+  <!-- 3D Canvas Background & Hero Scene -->
+  <div id="canvas-container">
+    <canvas id="three-canvas"></canvas>
+    <div class="canvas-overlay"></div>
+  </div>
+
+  <!-- Main Application Container -->
+  <div id="app-root">
+    
+    <!-- Top Header Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo-box">
+          <div class="logo-icon-3d">📖</div>
+          <div class="logo-text">
+            <span class="logo-title">DỊCH TRUYỆN <span class="badge-3d">3D</span></span>
+            <span class="logo-subtitle">DeepSeek AI Studio Pro v4.0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <!-- Floating 3D Controls -->
+        <div class="visualizer-controls">
+          <button id="btn-3d-toggle" class="chip-btn active" title="Đổi chế độ 3D Hero/Background">
+            <span class="chip-icon">✨</span> Giao diện 3D: <strong id="val-3d-mode">Hero 3D</strong>
+          </button>
+          <button id="btn-sound-toggle" class="chip-btn" title="Bật/Tắt âm thanh thông báo">
+            <span class="chip-icon" id="icon-sound">🔊</span> Âm thanh: <strong id="val-sound">Bật</strong>
+          </button>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="status-badge-box">
+          <div id="api-status-chip" class="status-chip chip-warning">
+            <span class="dot"></span>
+            <span id="api-status-text">Chưa cấu hình API Key</span>
+          </div>
+          <button id="btn-theme-toggle" class="btn-icon" title="Chuyển Chế độ Tối/Sáng">🌙</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="nav-tabs-bar">
+      <button class="nav-tab active" data-tab="tab-batch">
+        <span class="tab-icon">🚀</span> Dịch Batch File
+      </button>
+      <button class="nav-tab" data-tab="tab-quick">
+        <span class="tab-icon">⚡</span> Dịch Nhanh
+      </button>
+      <button class="nav-tab" data-tab="tab-scan">
+        <span class="tab-icon">🔍</span> Quét Thuật Ngữ
+      </button>
+      <button class="nav-tab" data-tab="tab-apikeys">
+        <span class="tab-icon">🔑</span> API Keys
+      </button>
+      <button class="nav-tab" data-tab="tab-prompts">
+        <span class="tab-icon">📜</span> Prompts
+      </button>
+      <button class="nav-tab" data-tab="tab-glossary">
+        <span class="tab-icon">📚</span> Từ Điển (Glossary)
+      </button>
+      <button class="nav-tab" data-tab="tab-drive">
+        <span class="tab-icon">☁️</span> Google Drive
+      </button>
+      <button class="nav-tab" data-tab="tab-stats">
+        <span class="tab-icon">📊</span> Thống Kê & Chi Phí
+      </button>
+      <button class="nav-tab" data-tab="tab-logs">
+        <span class="tab-icon">📋</span> Nhật Ký Terminal
+        <span id="log-count-badge" class="badge-count">0</span>
+      </button>
+    </nav>
+
+    <!-- Content Workspace -->
+    <main class="workspace-body">
+      
+      <!-- TAB 1: BATCH FILE TRANSLATION -->
+      <section id="tab-batch" class="tab-content active">
+        <div class="grid-2col">
+          
+          <!-- Column 1: Config & Controls -->
+          <div class="panel-card glass-panel">
+            <div class="panel-header">
+              <h3>⚙️ Cấu Hình Dịch Batch</h3>
+              <span class="panel-tag">Tệp tin (.txt)</span>
+            </div>
+
+            <!-- File Dropzone -->
+            <div class="form-group">
+              <label>Tệp truyện đầu vào (.txt)</label>
+              <div id="dropzone" class="file-dropzone">
+                <div class="dz-icon">📂</div>
+                <div class="dz-info">
+                  <span class="dz-title" id="dz-filename">Kéo thả tệp .txt vào đây hoặc bấm để chọn</span>
+                  <span class="dz-sub" id="dz-filesize">Chưa chọn tệp nào</span>
+                </div>
+                <button type="button" id="btn-browse-input" class="btn btn-secondary">Browse...</button>
+              </div>
+            </div>
+
+            <!-- Output File Path -->
+            <div class="form-group">
+              <label>File xuất kết quả (.txt)</label>
+              <div class="input-with-btn">
+                <input type="text" id="input-output-path" placeholder="Tự động tạo file xuất kết quả..." readonly />
+                <button type="button" id="btn-browse-output" class="btn btn-icon-sm" title="Đổi nơi lưu">📁</button>
+              </div>
+            </div>
+
+            <!-- Model Selection Row -->
+            <div class="form-row grid-2col-compact">
+              <div class="form-group">
+                <label>Model DeepSeek chính</label>
+                <select id="select-model" class="form-control">
+                  <option value="deepseek-v4-flash">deepseek-v4-flash (Siêu tốc & Tiết kiệm)</option>
+                  <option value="deepseek-v4-pro">deepseek-v4-pro (Chất lượng cao)</option>
+                  <option value="deepseek-chat">deepseek-chat (Tiêu chuẩn)</option>
+                  <option value="deepseek-reasoner">deepseek-reasoner (Suy luận chuyên sâu)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Chế độ suy luận (Thinking)</label>
+                <select id="select-thinking" class="form-control">
+                  <option value="disabled">Tắt (Disabled)</option>
+                  <option value="high">Cao (High)</option>
+                  <option value="max">Tối đa (Max)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Fallback Order -->
+            <div class="form-group">
+              <label>Thứ tự Model Fallback (ngăn cách bởi dấu |)</label>
+              <input type="text" id="input-fallback-order" placeholder="deepseek-v4-flash|deepseek-v4-pro" class="form-control" />
+              <small id="lbl-fallback-hint" class="text-muted">Chuyển model tự động khi vượt quota API.</small>
+            </div>
+
+            <!-- Tuning Parameters Collapsible -->
+            <div class="accordion-group">
+              <div class="accordion-header" id="acc-header-tuning">
+                <span>🎛️ Thông số nâng cao (Temperature, Tokens, Chunk, Threads)</span>
+                <span class="acc-chevron">▼</span>
+              </div>
+              <div class="accordion-content" id="acc-body-tuning">
+                <div class="form-row grid-2col-compact">
+                  <div class="form-group">
+                    <label>Temperature: <strong id="val-temp">0.3</strong></label>
+                    <input type="range" id="slider-temp" min="0" max="2" step="0.1" value="0.3" class="form-range" />
+                  </div>
+                  <div class="form-group">
+                    <label>Số luồng dịch: <strong id="val-threads">5</strong></label>
+                    <input type="range" id="slider-threads" min="1" max="20" step="1" value="5" class="form-range" />
+                  </div>
+                </div>
+
+                <div class="form-row grid-2col-compact">
+                  <div class="form-group">
+                    <label>Chunk Size (ký tự/đoạn)</label>
+                    <input type="number" id="input-chunk-size" value="4000" min="500" max="70000" class="form-control" />
+                  </div>
+                  <div class="form-group">
+                    <label>Max Output Tokens</label>
+                    <input type="number" id="input-max-tokens" value="8192" min="256" max="70000" class="form-control" />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>Cách chia Chunk (Split Mode)</label>
+                  <select id="select-split-mode" class="form-control">
+                    <option value="keyword">Chia theo từ khóa Chương/Chap/Hồi/Quyển</option>
+                    <option value="equals">Chia theo dòng phân cách ===</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Primary Action Buttons -->
+            <div class="action-btn-row">
+              <button type="button" id="btn-start-trans" class="btn btn-primary btn-glow btn-lg">
+                <span class="btn-icon">🚀</span> BẮT ĐẦU DỊCH TRUYỆN
+              </button>
+              <button type="button" id="btn-pause-trans" class="btn btn-warning btn-lg" disabled>
+                <span class="btn-icon">⏸️</span> TẠM DỪNG
+              </button>
+              <button type="button" id="btn-stop-trans" class="btn btn-danger btn-lg" disabled>
+                <span class="btn-icon">🛑</span> DỪNG DỊCH
+              </button>
+            </div>
+
+          </div>
+
+          <!-- Column 2: Live Progress & 3D HUD -->
+          <div class="panel-card glass-panel hud-panel">
+            <div class="panel-header">
+              <h3>📡 Tiến Độ & Thống Kê Thời Gian Thực</h3>
+              <span id="batch-status-tag" class="status-pill pill-idle">Sẵn sàng</span>
+            </div>
+
+            <!-- Progress HUD Ring Container -->
+            <div class="hud-center-box">
+              <div class="hud-ring-wrapper">
+                <svg class="progress-ring-svg" width="180" height="180">
+                  <circle class="ring-bg" cx="90" cy="90" r="78"></circle>
+                  <circle id="hud-progress-circle" class="ring-fill" cx="90" cy="90" r="78"></circle>
+                </svg>
+                <div class="hud-ring-content">
+                  <span id="hud-percent" class="hud-big-num">0%</span>
+                  <span id="hud-chunk-counts" class="hud-sub-num">0 / 0 đoạn</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Real-time Stats Grid -->
+            <div class="stats-mini-grid">
+              <div class="stat-card">
+                <span class="stat-icon">⏱️</span>
+                <div class="stat-info">
+                  <span class="stat-label">Thời gian đã chạy</span>
+                  <span id="stat-elapsed-time" class="stat-val">00:00:00</span>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <span class="stat-icon">⚡</span>
+                <div class="stat-info">
+                  <span class="stat-label">Tốc độ dịch</span>
+                  <span id="stat-speed" class="stat-val">0 ký tự/s</span>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <span class="stat-icon">🔤</span>
+                <div class="stat-info">
+                  <span class="stat-label">Ký tự (Gốc → Dịch)</span>
+                  <span id="stat-chars-count" class="stat-val">0 → 0</span>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <span class="stat-icon">🔢</span>
+                <div class="stat-info">
+                  <span class="stat-label">Tokens (Input / Output)</span>
+                  <span id="stat-tokens-count" class="stat-val">0 / 0</span>
+                </div>
+              </div>
+
+              <div class="stat-card span-2col gold-card">
+                <span class="stat-icon">💰</span>
+                <div class="stat-info">
+                  <span class="stat-label">Ước tính chi phí (USD & VND)</span>
+                  <span id="stat-cost-display" class="stat-val gold-val">$0.0000 (~ 0 VNĐ)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Mini Terminal Stream -->
+            <div class="mini-log-box">
+              <div class="mini-log-header">
+                <span>💬 Nhật ký hoạt động gần đây</span>
+                <button type="button" class="btn-link" onclick="switchTab('tab-logs')">Xem toàn bộ →</button>
+              </div>
+              <div id="mini-log-content" class="mini-log-text">Sẵn sàng thực hiện tác vụ dịch...</div>
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+      <!-- TAB 2: QUICK TRANSLATE (DỊCH NHANH CLIPBOARD) -->
+      <section id="tab-quick" class="tab-content">
+        <div class="panel-card glass-panel">
+          <div class="panel-header">
+            <h3>⚡ Dịch Nhanh Văn Bản / Clipboard</h3>
+            <div class="header-actions">
+              <select id="quick-select-model" class="form-control-sm">
+                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                <option value="deepseek-chat">deepseek-chat</option>
+                <option value="deepseek-reasoner">deepseek-reasoner</option>
+              </select>
+              <button type="button" id="btn-quick-paste" class="btn btn-secondary btn-sm">📋 Paste từ Clipboard</button>
+              <button type="button" id="btn-quick-translate" class="btn btn-primary btn-sm">🚀 Dịch Ngay</button>
+              <button type="button" id="btn-quick-copy" class="btn btn-success btn-sm">📄 Copy Kết Quả</button>
+            </div>
+          </div>
+
+          <div class="grid-2col editor-split">
+            <div class="editor-box">
+              <div class="editor-header">
+                <span>🇨🇳 Văn bản gốc (Tiếng Trung)</span>
+                <button type="button" id="btn-clear-quick-input" class="btn-text">Xóa sạch</button>
+              </div>
+              <textarea id="quick-input-text" placeholder="Dán văn bản tiếng Trung cần dịch vào đây..."></textarea>
+            </div>
+
+            <div class="editor-box">
+              <div class="editor-header">
+                <span>🇻🇳 Kết quả dịch (Tiếng Việt)</span>
+                <span id="quick-status-msg" class="text-muted">Chờ dịch...</span>
+              </div>
+              <textarea id="quick-output-text" placeholder="Kết quả tiếng Việt sẽ xuất hiện ở đây..." readonly></textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: QUÉT THUẬT NGỮ (GLOSSARY SCANNER) -->
+      <section id="tab-scan" class="tab-content">
+        <div class="panel-card glass-panel">
+          <div class="panel-header">
+            <h3>🔍 Quét Thuật Ngữ Tự Động Từ Truyện (AI Extract)</h3>
+            <span class="panel-tag">Tự động tìm Tên riêng, Xưng hô, Hán Việt</span>
+          </div>
+
+          <div class="scan-controls-box">
+            <div class="form-row grid-3col">
+              <div class="form-group">
+                <label>Giới hạn ký tự quét từ file truyện</label>
+                <input type="number" id="input-scan-limit" value="10000" min="500" max="200000" class="form-control" />
+              </div>
+              <div class="form-group">
+                <label>Model thực hiện quét</label>
+                <select id="scan-select-model" class="form-control">
+                  <option value="deepseek-v4-flash">deepseek-v4-flash (Khuyên dùng)</option>
+                  <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                  <option value="deepseek-chat">deepseek-chat</option>
+                </select>
+              </div>
+              <div class="form-group flex-end">
+                <button type="button" id="btn-run-scan" class="btn btn-primary btn-glow w-100">
+                  🔍 Bắt Đầu Quét Thuật Ngữ
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="scan-results-box">
+            <div class="results-header">
+              <h4>Danh sách thuật ngữ phát hiện được:</h4>
+              <button type="button" id="btn-append-scanned-glossary" class="btn btn-success btn-sm">
+                ➕ Thêm Tất Cả Vào Glossary Chồng
+              </button>
+            </div>
+            <textarea id="scanned-results-text" placeholder="Kết quả quét thuật ngữ (dạng Nguồn => Đích) sẽ xuất hiện tại đây..." rows="12"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: API KEYS MANAGER -->
+      <section id="tab-apikeys" class="tab-content">
+        <div class="panel-card glass-panel">
+          <div class="panel-header">
+            <h3>🔑 Quản Lý Hồ Sơ DeepSeek API Key</h3>
+            <button type="button" id="btn-add-apikey-profile" class="btn btn-primary btn-sm">➕ Thêm Key Mới</button>
+          </div>
+
+          <div class="grid-2col">
+            <div class="profile-list-box">
+              <label>Danh sách hồ sơ API Key</label>
+              <select id="select-apikey-profile" size="8" class="form-select-list"></select>
+              <div class="profile-actions">
+                <button type="button" id="btn-rename-apikey" class="btn btn-secondary btn-sm">✏️ Đổi Tên</button>
+                <button type="button" id="btn-delete-apikey" class="btn btn-danger btn-sm">🗑️ Xóa</button>
+              </div>
+            </div>
+
+            <div class="profile-detail-box">
+              <div class="form-group">
+                <label>DeepSeek API Key đang chọn</label>
+                <div class="input-with-btn">
+                  <input type="password" id="input-api-key-value" placeholder="sk-..." class="form-control" />
+                  <button type="button" id="btn-toggle-key-visibility" class="btn btn-icon-sm">👁️</button>
+                </div>
+                <small class="text-muted">API key được mã hóa bảo mật theo Machine Key trên thiết bị của bạn.</small>
+              </div>
+
+              <div class="form-group">
+                <label>Custom Base URL (Tùy chọn)</label>
+                <input type="text" id="input-api-base-url" value="https://api.deepseek.com" class="form-control" />
+              </div>
+
+              <div class="form-group">
+                <button type="button" id="btn-test-apikey" class="btn btn-info btn-glow">🧪 Kiểm tra kết nối API Key</button>
+                <span id="apikey-test-result" class="test-result-label"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: PROMPT TEMPLATES -->
+      <section id="tab-prompts" class="tab-content">
+        <div class="panel-card glass-panel">
+          <div class="panel-header">
+            <h3>📜 Mẫu Prompt Biên Tập Truyện</h3>
+            <div class="header-actions">
+              <select id="select-prompt-profile" class="form-control-sm"></select>
+              <button type="button" id="btn-add-prompt-profile" class="btn btn-primary btn-sm">➕ Thêm Mẫu Mới</button>
+              <button type="button" id="btn-rename-prompt" class="btn btn-secondary btn-sm">✏️ Đổi Tên</button>
+              <button type="button" id="btn-delete-prompt" class="btn btn-danger btn-sm">🗑️ Xóa</button>
+              <button type="button" id="btn-reset-default-prompt" class="btn btn-warning btn-sm">🔄 Reset Mặc Định</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Nội dung Prompt hướng dẫn AI (System / User Directive)</label>
+            <textarea id="prompt-editor-text" rows="14" class="code-textarea" placeholder="Nhập prompt biên dịch truyện..."></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: GLOASSARY EDITOR -->
+      <section id="tab-glossary" class="tab-content">
+        <div class="panel-card glass-panel">
+          <div class="panel-header">
+            <h3>📚 Từ Điển Nhân Vật & Thuật Ngữ (Glossary)</h3>
+            <span class="panel-tag">Định dạng: Nguồn => Đích (Mỗi mục 1 dòng)</span>
+          </div>
+
+          <div class="form-group">
+            <div class="glossary-toolbar">
+              <span class="text-muted">Ví dụ: <code>张三 => Trương Tam</code> hoặc <code> phát_hiện => tìm_thấy</code></span>
+              <button type="button" id="btn-clear-glossary" class="btn btn-text-danger">Xóa toàn bộ Glossary</button>
+            </div>
+            <textarea id="glossary-editor-text" rows="16" class="code-textarea" placeholder="Nguồn => Đích&#10;张三 => Trương Tam&#10;李四 => Lý Tư"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 7: GOOGLE DRIVE -->
+      <section id="tab-drive" class="tab-content">
+        <div class="panel-card glass-panel">
+          <div class="panel-header">
+            <h3>☁️ Tự Động Sao Lưu Lên Google Drive</h3>
+            <span class="panel-tag">Tải file đã dịch trực tiếp lên Drive</span>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-container">
+              <input type="checkbox" id="chk-drive-upload" />
+              <span class="checkmark"></span>
+              <strong>Tự động upload file sau khi dịch xong</strong>
+            </label>
+          </div>
+
+          <div class="grid-2col">
+            <div class="form-group">
+              <label>Tệp Credentials Google Drive (credentials.json)</label>
+              <div class="input-with-btn">
+                <input type="text" id="input-drive-credentials" placeholder="Đường dẫn credentials.json..." class="form-control" readonly />
+                <button type="button" id="btn-browse-drive-credentials" class="btn btn-secondary">Browse...</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Google Drive Folder ID (Tùy chọn)</label>
+              <input type="text" id="input-drive-folder-id" placeholder="VD: 1a2b3c4d5e6f..." class="form-control" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 8: STATS & HISTORY -->
+      <section id="tab-stats" class="tab-content">
+        <div class="panel-card glass-panel">
+          <div class="panel-header">
+            <h3>📊 Thống Kê Chi Phí & Lịch Sử Dịch Truyện</h3>
+            <button type="button" id="btn-clear-history" class="btn btn-danger btn-sm">🗑️ Xóa Lịch Sử</button>
+          </div>
+
+          <!-- KPI Summary Bar -->
+          <div class="kpi-summary-grid">
+            <div class="kpi-card">
+              <span class="kpi-title">Tổng số nhiệm vụ</span>
+              <span id="kpi-total-jobs" class="kpi-num">0</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-title">Tổng Input Tokens</span>
+              <span id="kpi-input-tokens" class="kpi-num">0</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-title">Tổng Output Tokens</span>
+              <span id="kpi-output-tokens" class="kpi-num">0</span>
+            </div>
+            <div class="kpi-card gold-kpi">
+              <span class="kpi-title">Tổng Chi Phí (USD)</span>
+              <span id="kpi-total-cost-usd" class="kpi-num gold-text">$0.0000</span>
+            </div>
+            <div class="kpi-card gold-kpi">
+              <span class="kpi-title">Tổng Chi Phí (VNĐ)</span>
+              <span id="kpi-total-cost-vnd" class="kpi-num gold-text">0 ₫</span>
+            </div>
+          </div>
+
+          <!-- History Data Table -->
+          <div class="table-container">
+            <table id="history-table" class="data-table">
+              <thead>
+                <tr>
+                  <th>Trạng thái</th>
+                  <th>Thời gian bắt đầu</th>
+                  <th>Thời lượng</th>
+                  <th>File đầu vào</th>
+                  <th>Model</th>
+                  <th>Số đoạn</th>
+                  <th>Tổng Tokens</th>
+                  <th>Chi phí ($)</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody">
+                <tr><td colspan="9" class="text-center text-muted">Chưa có lịch sử dịch nào.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 9: LOGS TERMINAL -->
+      <section id="tab-logs" class="tab-content">
+        <div class="panel-card glass-panel terminal-panel">
+          <div class="panel-header">
+            <h3>📋 Nhật Ký Hoạt Động Hệ Thống (Terminal Log)</h3>
+            <div class="header-actions">
+              <button type="button" id="btn-clear-logs" class="btn btn-secondary btn-sm">🧹 Xóa Nhật Ký</button>
+              <label class="checkbox-container-sm">
+                <input type="checkbox" id="chk-autoscroll-logs" checked />
+                <span>Tự động cuộn</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="full-log-terminal" class="terminal-body"></div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer Bar -->
+    <footer class="app-footer">
+      <span>Dịch Truyện 3D Studio — Powered by DeepSeek & Antigravity AI Engine</span>
+      <span id="footer-status-text">Đã sẵn sàng</span>
+    </footer>
+
+  </div>
+
+  <!-- Diff Viewer Modal -->
+  <div id="modal-diff" class="modal-backdrop hidden">
+    <div class="modal-dialog modal-xl glass-modal">
+      <div class="modal-header">
+        <h3>🔄 So Sánh Gốc (Trung) vs Dịch (Việt)</h3>
+        <button type="button" class="btn-close-modal" onclick="closeDiffModal()">✕</button>
+      </div>
+      <div class="modal-body grid-2col">
+        <div class="editor-box">
+          <div class="editor-header">📄 Bản Gốc</div>
+          <textarea id="diff-left-text" readonly></textarea>
+        </div>
+        <div class="editor-box">
+          <div class="editor-header">📝 Bản Dịch</div>
+          <textarea id="diff-right-text" readonly></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeDiffModal()">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
