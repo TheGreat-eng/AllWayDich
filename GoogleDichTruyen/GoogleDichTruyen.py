@@ -6,6 +6,8 @@ import time
 import datetime
 import json
 import threading
+import queue
+import tempfile
 import random
 import base64
 import hashlib
@@ -75,6 +77,83 @@ is_paused = False
 is_stopped = False
 pause_event = threading.Event()
 pause_event.set()
+translation_worker_thread = None
+app_close_requested = False
+
+# Bound a stuck network request, and retain clients so Stop/Exit can interrupt
+# active requests immediately instead of waiting for the network stack forever.
+API_REQUEST_TIMEOUT_MS = 180_000
+active_gemini_clients = set()
+active_gemini_clients_lock = threading.Lock()
+
+
+def register_gemini_client(client):
+	with active_gemini_clients_lock:
+		active_gemini_clients.add(client)
+
+
+def unregister_gemini_client(client):
+	with active_gemini_clients_lock:
+		active_gemini_clients.discard(client)
+
+
+def close_active_gemini_clients():
+	"""Interrupt all in-flight Gemini requests; individual workers then exit."""
+	with active_gemini_clients_lock:
+		clients = list(active_gemini_clients)
+	for client in clients:
+		try:
+			client.close()
+		except Exception:
+			pass
+
+# Tkinter must only ever be touched by the main thread.  Worker threads put
+# small UI jobs here; the main loop drains them through ``root.after``.
+ui_event_queue = queue.Queue()
+
+
+def post_to_ui(callback, *args, **kwargs):
+	"""Schedule a UI callback without calling any Tk method from a worker."""
+	ui_event_queue.put((callback, args, kwargs))
+
+
+def process_ui_events():
+	"""Run queued UI work from Tk's main thread in bounded batches."""
+	processed = 0
+	while processed < 200:
+		try:
+			callback, args, kwargs = ui_event_queue.get_nowait()
+		except queue.Empty:
+			break
+		try:
+			callback(*args, **kwargs)
+		except tk.TclError:
+			# The window may be closing while a background task is winding down.
+			pass
+		except Exception as exc:
+			print(f"UI event failed: {exc}")
+		processed += 1
+	if root.winfo_exists():
+		root.after(50, process_ui_events)
+
+
+def ask_yes_no_from_worker(title, message):
+	"""Ask a modal question on the UI thread and return its answer to a worker."""
+	if threading.current_thread() is threading.main_thread():
+		return messagebox.askyesno(title, message)
+
+	done = threading.Event()
+	answer = {"value": False}
+
+	def ask():
+		try:
+			answer["value"] = messagebox.askyesno(title, message)
+		finally:
+			done.set()
+
+	post_to_ui(ask)
+	done.wait()
+	return answer["value"]
 
 
 # ================= THỐNG KÊ =================
@@ -575,7 +654,36 @@ def delete_prompt():
 		add_log(f"📝 Đã xóa Prompt: {curr_prompt}")
 
 
+def _finish_closing_after_worker():
+	"""Keep Tk alive until the translation worker has flushed its checkpoint."""
+	worker = translation_worker_thread
+	if worker is not None and worker.is_alive():
+		root.after(100, _finish_closing_after_worker)
+		return
+	save_settings()
+	root.destroy()
+
+
 def on_closing():
+	global is_stopped, is_paused, app_close_requested
+	worker = translation_worker_thread
+	if worker is not None and worker.is_alive():
+		if not app_close_requested:
+			if not messagebox.askyesno(
+				"Dang dich",
+				"App dang dich. Dung an toan, luu checkpoint roi thoat?",
+			):
+				return
+			app_close_requested = True
+			is_stopped = True
+			is_paused = False
+			pause_event.set()
+			close_active_gemini_clients()
+			if "status_var" in globals():
+				status_var.set("Dang dung va luu tien trinh truoc khi thoat...")
+			add_log("Dang dung an toan truoc khi thoat app...")
+		root.after(100, _finish_closing_after_worker)
+		return
 	save_settings()
 	root.destroy()
 
@@ -689,19 +797,15 @@ def add_log(message):
 	if threading.current_thread() is threading.main_thread():
 		_append_to_log_box()
 	else:
-		try:
-			if "root" in globals() and root.winfo_exists():
-				root.after(0, _append_to_log_box)
-		except Exception:
-			pass
+		# Calling root.after from a worker is still an unsafe Tk operation.
+		post_to_ui(_append_to_log_box)
 
 	print(log_message.strip())
 
 
 def show_completion_dialog(title, message, drive_link=""):
 	if threading.current_thread() is not threading.main_thread():
-		if "root" in globals() and root.winfo_exists():
-			root.after(0, lambda: show_completion_dialog(title, message, drive_link))
+		post_to_ui(show_completion_dialog, title, message, drive_link)
 		return
 
 	win = tk.Toplevel(root)
@@ -709,6 +813,8 @@ def show_completion_dialog(title, message, drive_link=""):
 	win.configure(bg=PALETTE["panel"])
 	win.transient(root)
 	win.grab_set()
+	win.lift()
+	win.focus_force()
 	win.resizable(False, False)
 
 	container = tk.Frame(win, bg=PALETTE["panel"], padx=16, pady=14)
@@ -907,6 +1013,24 @@ def read_file_content_safely(file_path):
 	# Fallback to utf-8 with errors='replace' to never fail
 	with open(file_path, "r", encoding="utf-8", errors="replace") as f:
 		return f.read()
+
+
+def write_text_atomically(file_path, content):
+	"""Write a complete output file, or keep the previous one untouched."""
+	directory = os.path.dirname(os.path.abspath(file_path)) or "."
+	fd, temp_path = tempfile.mkstemp(prefix=".translation-", suffix=".tmp", dir=directory, text=True)
+	try:
+		with os.fdopen(fd, "w", encoding="utf-8") as output:
+			output.write(content)
+			output.flush()
+			os.fsync(output.fileno())
+		os.replace(temp_path, file_path)
+	finally:
+		if os.path.exists(temp_path):
+			try:
+				os.remove(temp_path)
+			except OSError:
+				pass
 
 
 def save_checkpoint(cp_file, index, text):
@@ -1721,7 +1845,7 @@ def is_gemini_v3_or_above(model_name):
 	return False
 
 
-def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens, thinking_level=None):
+def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_tokens, thinking_level=None, api_key=None):
 	"""Translate text using Gemini. Returns (text, input_tokens, output_tokens, error_code).
 	Error codes: None = success, 'QUOTA' = rate limit exceeded, 'ERROR' = other error.
 	"""
@@ -1746,15 +1870,23 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		except Exception:
 			return ""
 
-	api_key = ""
-	if "api_key_entry" in globals() and api_key_entry.winfo_exists():
-		api_key = api_key_entry.get().strip()
+	# Background workers receive a snapshot from the main thread.  Do not read
+	# Entry/StringVar objects here, because they belong to Tk's main thread.
+	if api_key is None:
+		api_key = ""
+		if threading.current_thread() is threading.main_thread() and "api_key_entry" in globals():
+			api_key = api_key_entry.get().strip()
 
 	if genai is None:
 		return None, 0, 0, 'ERROR'
 
+	client = None
 	try:
-		client = genai.Client(api_key=api_key)
+		client = genai.Client(
+			api_key=api_key,
+			http_options=genai_types.HttpOptions(timeout=API_REQUEST_TIMEOUT_MS),
+		)
+		register_gemini_client(client)
 		full_prompt = prompt + "\n\nNỘI DUNG CẦN DỊCH:\n" + chunk
 		
 		config_args = {
@@ -1764,7 +1896,7 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 		
 		if is_gemini_v3_or_above(model_id):
 			if thinking_level is None:
-				if "thinking_level_var" in globals():
+				if threading.current_thread() is threading.main_thread() and "thinking_level_var" in globals():
 					thinking_level = thinking_level_var.get().lower().strip()
 				else:
 					thinking_level = "medium"
@@ -1842,13 +1974,20 @@ def translate_with_gemini(model_id, prompt, chunk, temperature, max_output_token
 			return None, 0, 0, 'QUOTA'
 		else:
 			return None, 0, 0, error_str
+	finally:
+		if client is not None:
+			unregister_gemini_client(client)
+			try:
+				client.close()
+			except Exception:
+				pass
 
 
 
 
 
 # ================= DỊCH 1 CHUNK =================
-def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3, failed_file=None):
+def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_output_tokens, model_fallback_order=None, retries=3, failed_file=None, api_key=None, thinking_level=None):
 	global is_stopped
 
 	pause_event.wait()
@@ -1871,7 +2010,10 @@ def translate_chunk(model_id, prompt, chunk, index, cp_file, temperature, max_ou
 			current_model = model_fallback_order[current_model_index] if current_model_index < len(model_fallback_order) else model_fallback_order[0]
 			add_log(f"⏳ Đang dịch đoạn {index + 1} (model: {current_model})... (lần thử {attempt + 1}/{retries})")
 			record_request_event(current_model)
-			translated_text, input_tokens, output_tokens, error_code = translate_with_gemini(current_model, prompt, chunk, temperature, max_output_tokens)
+			translated_text, input_tokens, output_tokens, error_code = translate_with_gemini(
+				current_model, prompt, chunk, temperature, max_output_tokens,
+				thinking_level=thinking_level, api_key=api_key,
+			)
 			
 			if error_code == 'QUOTA':
 				if current_model_index + 1 < len(model_fallback_order):
@@ -1949,6 +2091,7 @@ def stop_translation():
 		is_stopped = True
 		is_paused = False
 		pause_event.set()
+		close_active_gemini_clients()
 		add_log("🛑 Đang dừng quá trình dịch...")
 
 
@@ -2151,7 +2294,10 @@ def scan_story():
 
 			for seg_idx, segment in enumerate(scan_segments, 1):
 				add_log(f"🔎 Quét đoạn mẫu {seg_idx}/{len(scan_segments)}...")
-				raw_result, _, _, _ = translate_with_gemini(model_id, scan_prompt, segment, temperature, 3072)
+				raw_result, _, _, _ = translate_with_gemini(
+					model_id, scan_prompt, segment, temperature, 3072,
+					thinking_level="medium", api_key=api_key,
+				)
 				if not raw_result or "không có" in raw_result.lower():
 					continue
 
@@ -2184,21 +2330,21 @@ def scan_story():
 						glossary_text.insert(tk.END, new_glossary)
 						add_log("📝 Đã thêm thuật ngữ vào Glossary.")
 				
-				root.after(0, ask_user)
+				post_to_ui(ask_user)
 			else:
 				add_log("ℹ️ Không tìm thấy thuật ngữ đặc biệt nào.")
-				root.after(0, lambda: messagebox.showinfo("Kết quả", "Không tìm thấy thuật ngữ đặc biệt nào từ các đoạn đầu truyện."))
+				post_to_ui(messagebox.showinfo, "Kết quả", "Không tìm thấy thuật ngữ đặc biệt nào từ các đoạn đầu truyện.")
 				
 		except Exception as e:
 			add_log(f"🛑 Lỗi khi quét thuật ngữ: {e}")
-			root.after(0, lambda: messagebox.showerror("Lỗi", f"Có lỗi xảy ra: {e}"))
+			post_to_ui(messagebox.showerror, "Lỗi", f"Có lỗi xảy ra: {e}")
 			
 	threading.Thread(target=run_scan, daemon=True).start()
 
 
 
 # ================= 1. PHƯƠNG THỨC KÍCH HOẠT (START) =================
-def start_translation():
+def _legacy_start_translation_unsafe():
 	global is_stopped, is_paused
 
 	if not validate_inputs():
@@ -2214,7 +2360,7 @@ def start_translation():
 
 	save_settings()
 
-	task_thread = threading.Thread(target=process_translation_logic)
+	task_thread = threading.Thread(target=_legacy_process_translation_logic_unsafe)
 	task_thread.daemon = True
 	task_thread.start()
 
@@ -2232,7 +2378,7 @@ def stats_update_loop():
 
 
 # ================= 2. PHƯƠNG THỨC LOGIC CHÍNH (LOGIC) =================
-def process_translation_logic():
+def _legacy_process_translation_logic_unsafe():
 	global is_stopped
 
 	btn_start.config(state="disabled")
@@ -2602,18 +2748,20 @@ def translate_clipboard_text():
 	
 	quick_status_var.set("⏳ Đang dịch...")
 	
+	model_id = quick_model_var.get()
+	temperature = float(temp_var.get())
+	max_tokens = int(max_output_tokens_var.get())
+	prompt = prompt_text.get("1.0", tk.END).strip()
+	glossary_entries = parse_glossary(glossary_text.get("1.0", tk.END).strip())
+	thinking_level = thinking_level_var.get().lower().strip()
+	final_prompt = build_prompt_with_glossary(prompt, glossary_entries)
+
 	def _worker():
 		try:
-			model_id = quick_model_var.get()
-			temperature = float(temp_var.get())
-			max_tokens = int(max_output_tokens_var.get())
-			prompt = prompt_text.get("1.0", tk.END).strip()
-			glossary_raw = glossary_text.get("1.0", tk.END).strip()
-			glossary_entries = parse_glossary(glossary_raw)
-			final_prompt = build_prompt_with_glossary(prompt, glossary_entries)
 			
 			result, input_tokens, output_tokens, error_code = translate_with_gemini(
-				model_id, final_prompt, input_text, temperature, max_tokens
+				model_id, final_prompt, input_text, temperature, max_tokens,
+				thinking_level=thinking_level, api_key=api_key,
 			)
 			
 			if error_code:
@@ -2629,16 +2777,194 @@ def translate_clipboard_text():
 					f"✅ Dịch xong! Input: {input_tokens:,} | Output: {output_tokens:,}"
 				)
 			
-			root.after(0, _update_ui)
+			post_to_ui(_update_ui)
 		except Exception as e:
 			def _show_error():
 				quick_status_var.set(f"❌ Lỗi: {str(e)[:80]}")
-			root.after(0, _show_error)
+			post_to_ui(_show_error)
 	
 	threading.Thread(target=_worker, daemon=True).start()
 
 
 # ================= GUI (Giao diện) =================
+def update_translation_progress(done, total):
+	"""Main-thread-only progress update."""
+	progress_bar["maximum"] = total
+	progress_bar["value"] = done
+	status_var.set(f"Tien do: {done}/{total}")
+
+
+def finalize_translation_ui():
+	"""Rebuild the history views once, from the main thread."""
+	refresh_history_display()  # also rebuilds request table
+	refresh_cost_stats()
+	btn_start.config(state="normal")
+	btn_pause.config(state="disabled", text="Tam dung", bg="#FFC107")
+	btn_stop.config(state="disabled")
+	status_var.set("San sang")
+
+
+def stats_update_loop_safe():
+	if not is_stopped:
+		update_stats_display()
+		root.after(1000, stats_update_loop_safe)
+
+
+def process_translation_logic_safe(config):
+	"""Worker: it never reads or writes a Tk widget."""
+	global is_stopped
+	for key, value in {
+		"start_time": time.time(), "chunks_done": 0, "total_input_chars": 0,
+		"total_output_chars": 0, "total_input_tokens": 0, "total_output_tokens": 0,
+		"total_input_cost_usd": 0.0, "total_output_cost_usd": 0.0, "total_cost_usd": 0.0,
+	}.items():
+		stats[key] = value
+	reset_request_metrics()
+
+	history_status, history_error, drive_file_id, drive_link = "error", "", "", ""
+	in_file, out_file, model = config["in_file"], config["out_file"], config["model"]
+	threads, temperature = config["threads"], config["temperature"]
+	try:
+		cp_file, failed_file = get_checkpoint_path(in_file), get_failed_chunks_path(in_file)
+		source_text = read_file_content_safely(in_file)
+		chunks = split_text(source_text, size=config["chunk_size"], split_mode=config["split_mode"])
+		total = len(chunks)
+		checkpoint_metadata = build_checkpoint_metadata(source_text, config["chunk_size"], config["split_mode"], total)
+		stats["total_chunks"] = total
+		results = [None] * total
+		post_to_ui(fallback_order_hint_var.set, "Fallback: " + " -> ".join(config["fallback_order"]))
+
+		has_checkpoint, saved_data = False, {}
+		with checkpoint_lock:
+			if os.path.exists(cp_file):
+				try:
+					metadata, saved_data = read_checkpoint_data(cp_file)
+					has_checkpoint = checkpoint_matches(metadata, checkpoint_metadata)
+				except Exception as exc:
+					add_log(f"Cannot read checkpoint: {exc}")
+		if has_checkpoint and saved_data:
+			if ask_yes_no_from_worker("Khoi phuc", f"Tim thay {len(saved_data)}/{total} doan da dich. Tiep tuc?"):
+				for saved_index, saved_text in saved_data.items():
+					index = int(saved_index)
+					if 0 <= index < total:
+						results[index] = saved_text
+				stats["chunks_done"] = sum(item is not None for item in results)
+			else:
+				reset_checkpoint(cp_file, checkpoint_metadata)
+		else:
+			reset_checkpoint(cp_file, checkpoint_metadata)
+
+		pending = [index for index, item in enumerate(results) if item is None]
+		completed = total - len(pending)
+		post_to_ui(update_translation_progress, completed, total)
+		add_log(f"Starting {len(pending)} pending chunks with {model}.")
+		with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+			futures = {
+				executor.submit(
+					translate_chunk, model, config["prompt"], chunks[index], index, cp_file,
+					temperature, config["max_output_tokens"], config["fallback_order"],
+					failed_file=failed_file, api_key=config["api_key"], thinking_level=config["thinking_level"],
+				): index for index in pending
+			}
+			for future in concurrent.futures.as_completed(futures):
+				if is_stopped:
+					for pending_future in futures:
+						pending_future.cancel()
+					break
+				index, translated = future.result()
+				if translated is not None:
+					results[index] = translated
+					completed += 1
+					post_to_ui(update_translation_progress, completed, total)
+
+		if is_stopped:
+			history_status = "stopped"
+			post_to_ui(messagebox.showinfo, "Da dung", "Tien trinh da duoc luu de tiep tuc sau.")
+			return
+
+		write_text_atomically(
+			out_file,
+			"\n\n".join(result if result is not None else chunks[index] for index, result in enumerate(results)),
+		)
+		failed_count = len(load_current_failed_chunks(failed_file, chunks))
+		history_status = "completed_with_failures" if failed_count else "completed"
+		if not failed_count:
+			with checkpoint_lock:
+				write_checkpoint_data(get_translation_cache_path(in_file), checkpoint_metadata, {
+					str(index): translated for index, translated in enumerate(results)
+				})
+				if os.path.exists(cp_file):
+					os.remove(cp_file)
+		if config["drive_upload"]:
+			try:
+				drive_file_id, drive_link = upload_file_to_drive(out_file, config["drive_credentials_path"], config["drive_folder_id"])
+			except Exception as exc:
+				add_log(f"Google Drive upload failed: {exc}")
+		total_time = time.time() - stats["start_time"]
+		message = f"Da dich xong.\nThoi gian: {format_time(total_time)}\nTong chi phi: ${stats['total_cost_usd']:.4f}\nLuu tai: {out_file}"
+		if failed_count:
+			message += f"\nChunk loi con lai: {failed_count}"
+		post_to_ui(show_completion_dialog, "Hoan tat", message, drive_link)
+	except Exception as exc:
+		history_error = str(exc)
+		add_log(f"System error: {history_error}")
+		post_to_ui(messagebox.showerror, "Loi", f"Qua trinh dich bi gian doan: {history_error}")
+	finally:
+		end_time = time.time()
+		duration = max(0, int(end_time - stats["start_time"])) if stats["start_time"] else 0
+		request_metrics = get_request_metrics_snapshot()
+		total_requests, peak_requests_per_minute, _ = summarize_request_counts(request_metrics)
+		save_translation_history_entry({
+			"engine": "Google Gemini", "status": history_status,
+			"start_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats["start_time"] or end_time)),
+			"end_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_time)),
+			"duration_seconds": duration, "input_file": in_file, "output_file": out_file,
+			"model": model, "threads": threads, "temperature": temperature,
+			"chunks_done": stats["chunks_done"], "total_chunks": stats["total_chunks"],
+			"failed_chunks": len(load_failed_chunks(get_failed_chunks_path(in_file))) if in_file else 0,
+			"total_input_chars": stats["total_input_chars"], "total_output_chars": stats["total_output_chars"],
+			"total_input_tokens": stats["total_input_tokens"], "total_output_tokens": stats["total_output_tokens"],
+			"total_input_cost_usd": round(stats["total_input_cost_usd"], 6), "total_output_cost_usd": round(stats["total_output_cost_usd"], 6),
+			"total_cost_usd": round(stats["total_cost_usd"], 6), "total_cost_vnd": int(round(stats["total_cost_usd"] * USD_TO_VND)),
+			"request_counts_by_minute": request_metrics, "total_requests": total_requests, "peak_requests_per_minute": peak_requests_per_minute,
+			"drive_file_id": drive_file_id, "drive_link": drive_link, "error": history_error,
+		})
+		is_stopped = True
+		post_to_ui(finalize_translation_ui)
+
+
+def start_translation_safe():
+	"""Capture Tk values before starting worker threads."""
+	global is_stopped, is_paused, translation_worker_thread, app_close_requested
+	if not validate_inputs():
+		return
+	is_stopped, is_paused, app_close_requested = False, False, False
+	pause_event.set()
+	output_path.set(build_default_output_path(input_path.get(), model_var.get()))
+	save_settings()
+	model = model_var.get()
+	fallback = [item.strip() for item in model_fallback_order_var.get().split("|") if item.strip()]
+	fallback = [model] + [item for item in fallback if item != model]
+	config = {
+		"api_key": api_key_entry.get().strip(), "in_file": input_path.get(), "out_file": output_path.get(), "model": model,
+		"fallback_order": fallback, "threads": int(thread_var.get()), "chunk_size": int(chunk_size_var.get()),
+		"max_output_tokens": int(max_output_tokens_var.get()), "temperature": float(temp_var.get()), "split_mode": chunk_split_mode_var.get(),
+		"thinking_level": thinking_level_var.get().lower().strip(),
+		"prompt": build_prompt_with_glossary(prompt_text.get("1.0", tk.END).strip(), parse_glossary(glossary_text.get("1.0", tk.END).strip())),
+		"drive_upload": bool(drive_upload_var.get()), "drive_credentials_path": drive_credentials_path_var.get().strip(), "drive_folder_id": drive_folder_id_var.get().strip(),
+	}
+	btn_start.config(state="disabled")
+	btn_pause.config(state="normal")
+	btn_stop.config(state="normal")
+	translation_worker_thread = threading.Thread(
+		target=process_translation_logic_safe,
+		args=(config,),
+		daemon=False,
+	)
+	translation_worker_thread.start()
+	root.after(1000, stats_update_loop_safe)
+
+
 root = tk.Tk()
 root.title("📖 App Dịch Truyện – Powered by Google Gemini")
 root.geometry("1100x950")
@@ -3255,6 +3581,12 @@ def open_regenerate_dialog():
 		temperature = float(temp_var.get())
 		max_tokens = int(max_output_tokens_var.get())
 		api_key = api_key_entry.get().strip()
+		thinking_level = thinking_level_var.get().lower().strip()
+		input_file = input_path.get()
+		storage_file = get_chunk_storage_path(input_file)
+		chunk_size = int(chunk_size_var.get())
+		split_mode = chunk_split_mode_var.get()
+		failed_file = get_failed_chunks_path(input_file)
 		
 		trans_text.config(state="disabled")
 		trans_text.delete("1.0", tk.END)
@@ -3262,28 +3594,27 @@ def open_regenerate_dialog():
 		
 		def run():
 			try:
-				input_file = input_path.get()
-				storage_file = get_chunk_storage_path(input_file)
 				if not os.path.exists(storage_file):
 					source_text = read_file_content_safely(input_file)
 					reset_checkpoint(
 						storage_file,
 						build_checkpoint_metadata(
-							source_text, int(chunk_size_var.get()), chunk_split_mode_var.get(), len(previewed_chunks)
+							source_text, chunk_size, split_mode, len(previewed_chunks)
 						),
 					)
 				_, result = translate_chunk(
 					model, full_prompt, chunk_text, index, storage_file,
-					temperature, max_tokens, failed_file=get_failed_chunks_path(input_file)
+					temperature, max_tokens, failed_file=failed_file,
+					api_key=api_key, thinking_level=thinking_level,
 				)
 				
-				dialog.after(0, lambda: [
+				post_to_ui(lambda: [
 					trans_text.config(state="normal"),
 					trans_text.delete("1.0", tk.END),
 					trans_text.insert(tk.END, result if result else "LỖI DỊCH THUẬT (Kết quả rỗng)"),
 				])
 			except Exception as e:
-				dialog.after(0, lambda: [
+				post_to_ui(lambda: [
 					trans_text.config(state="normal"),
 					trans_text.delete("1.0", tk.END),
 					trans_text.insert(tk.END, f"LỖI: {e}"),
@@ -4164,7 +4495,7 @@ btn_start = tk.Button(
 	bd=0,
 	padx=10,
 	pady=12,
-	command=start_translation,
+	command=start_translation_safe,
 )
 btn_start.grid(row=3, column=2, sticky="ew", padx=(6, 0))
 
@@ -4408,4 +4739,5 @@ try:
 except NameError:
 	pass
 
+root.after(50, process_ui_events)
 root.mainloop()
