@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AWSDichTruyen 3D Studio - Milky Way Space Edition</title>
+    <title>AWSDichTruyen 3D Studio - Smooth Glowing Sun Edition</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,6 +12,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Three.js CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         :root {
             /* Deep Space Sci-Fi Color Tokens (Default Dark) */
@@ -128,10 +130,10 @@
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
-            background: rgba(8, 15, 30, 0.75);
+            background: rgba(8, 15, 30, 0.85);
             backdrop-filter: blur(24px) saturate(220%);
             -webkit-backdrop-filter: blur(24px) saturate(220%);
-            border: 1px solid var(--accent-cyan);
+            border: 1px solid var(--accent-gold);
             color: #ffffff;
             padding: 12px 28px;
             border-radius: 30px;
@@ -142,14 +144,14 @@
             display: none;
             align-items: center;
             gap: 12px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7), 0 0 25px rgba(56, 189, 248, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7), 0 0 25px rgba(255, 170, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
             transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         #zen-restore-btn:hover {
             transform: translateX(-50%) scale(1.08);
-            background: linear-gradient(135deg, rgba(6, 182, 212, 0.9), rgba(168, 85, 247, 0.9));
-            box-shadow: 0 12px 45px rgba(56, 189, 248, 0.8), 0 0 35px rgba(192, 132, 252, 0.9);
+            background: linear-gradient(135deg, rgba(255, 170, 0, 0.9), rgba(244, 63, 94, 0.9));
+            box-shadow: 0 12px 45px rgba(255, 170, 0, 0.8), 0 0 35px rgba(244, 63, 94, 0.9);
         }
 
         /* Header Navigation Bar */
@@ -183,20 +185,20 @@
         .brand-icon {
             width: 44px;
             height: 44px;
-            background: linear-gradient(135deg, #06b6d4, #a855f7, #ec4899);
+            background: linear-gradient(135deg, #ffaa00, #ff4500, #ec4899);
             border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 22px;
             color: #ffffff;
-            box-shadow: 0 0 22px rgba(56, 189, 248, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 22px rgba(255, 170, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.9);
             animation: pulse-logo 3s infinite ease-in-out;
         }
 
         @keyframes pulse-logo {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 22px rgba(56, 189, 248, 0.7); }
-            50% { transform: scale(1.05); box-shadow: 0 0 32px rgba(192, 132, 252, 0.95); }
+            0%, 100% { transform: scale(1); box-shadow: 0 0 22px rgba(255, 170, 0, 0.7); }
+            50% { transform: scale(1.05); box-shadow: 0 0 32px rgba(244, 63, 94, 0.95); }
         }
 
         .brand-title {
@@ -204,7 +206,7 @@
             font-weight: 800;
             color: var(--text-main);
             letter-spacing: 0.6px;
-            text-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+            text-shadow: 0 0 15px rgba(255, 170, 0, 0.5);
         }
 
         .nav-tabs {
@@ -238,10 +240,10 @@
 
         .nav-tab.active {
             color: #ffffff;
-            background: linear-gradient(135deg, #06b6d4, #a855f7);
+            background: linear-gradient(135deg, #ffaa00, #ff4500);
             font-weight: 700;
             border: 1px solid rgba(255, 255, 255, 0.5);
-            box-shadow: 0 4px 18px rgba(56, 189, 248, 0.5);
+            box-shadow: 0 4px 18px rgba(255, 170, 0, 0.5);
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
         }
 
@@ -445,7 +447,7 @@
             padding: 16px;
             border-radius: 14px;
             border: 1px solid rgba(255, 255, 255, 0.5);
-            background: linear-gradient(135deg, #06b6d4, #a855f7, #ec4899);
+            background: linear-gradient(135deg, #ffaa00, #ff4500, #ec4899);
             background-size: 200% 200%;
             animation: gradient-shift 6s ease infinite;
             color: #ffffff;
@@ -457,7 +459,7 @@
             align-items: center;
             justify-content: center;
             gap: 10px;
-            box-shadow: 0 6px 25px rgba(168, 85, 247, 0.6);
+            box-shadow: 0 6px 25px rgba(255, 170, 0, 0.6);
             transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
             text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
         }
@@ -470,7 +472,7 @@
 
         .btn-translate:hover {
             transform: translateY(-3px) scale(1.02);
-            box-shadow: 0 10px 35px rgba(56, 189, 248, 0.85);
+            box-shadow: 0 10px 35px rgba(255, 170, 0, 0.85);
         }
 
         .btn-action-secondary {
@@ -545,10 +547,10 @@
         .progress-bar-fill {
             height: 100%;
             width: 0%;
-            background: linear-gradient(90deg, #06b6d4, #a855f7, #ec4899);
+            background: linear-gradient(90deg, #ffaa00, #ff4500, #ec4899);
             border-radius: 10px;
             transition: width 0.35s ease;
-            box-shadow: 0 0 20px rgba(56, 189, 248, 0.8);
+            box-shadow: 0 0 20px rgba(255, 170, 0, 0.8);
         }
 
         .stats-grid {
@@ -689,7 +691,7 @@
 
     <!-- Sci-Fi Holographic Zen View Restoration Button -->
     <div id="zen-restore-btn" onclick="toggleZenMode()">
-        <i class="fa-solid fa-atom fa-spin" style="color: var(--accent-cyan);"></i>
+        <i class="fa-solid fa-sun fa-spin" style="color: var(--accent-gold);"></i>
         <span>Hiện Giao Diện (ESC)</span>
     </div>
 
@@ -698,7 +700,7 @@
         <!-- Header Navigation Bar -->
         <header>
             <div class="brand">
-                <div class="brand-icon"><i class="fa-solid fa-globe"></i></div>
+                <div class="brand-icon"><i class="fa-solid fa-sun"></i></div>
                 <div class="brand-title">AWSDichTruyen 3D Studio</div>
             </div>
 
@@ -744,8 +746,8 @@
                     <i class="fa-solid fa-moon"></i> <span id="theme-btn-text">Tối</span>
                 </button>
 
-                <button class="btn-action-secondary" onclick="toggleZenMode()" title="Ẩn giao diện ngắm nền 3D">
-                    <i class="fa-solid fa-eye-slash"></i> <span>Ẩn UI</span>
+                <button class="btn-action-secondary" onclick="toggleZenMode()" title="Ẩn giao diện & Xoay 360° Mặt Trời 3D">
+                    <i class="fa-solid fa-eye-slash"></i> <span>Ẩn UI (3D 360°)</span>
                 </button>
             </div>
         </header>
@@ -965,15 +967,78 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <!-- 3D HIGH-DENSITY MILKY WAY STARFIELD & PHOTOREALISTIC PLANET ENGINE -->
+    <!-- 3D CLEAN GLOWING SUN & STARFIELD ENGINE -->
     <script>
-        let scene, camera, renderer;
-        let photorealisticPlanet, atmosphereHaloMesh, sunLight;
+        let scene, camera, renderer, orbitControls;
+        let glowingSunCore, sunPointLight;
         let fgStarPoints, midStarPoints, deepStarPoints, milkyWayPoints;
         let mouseX = 0, mouseY = 0;
         let clock = new THREE.Clock();
 
-        // 1. Texture Generators
+        // 1. Procedural 2D Texture Generators
+        function createCleanSunTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            // Solid background gradient
+            const baseGrad = ctx.createLinearGradient(0, 0, 0, 512);
+            baseGrad.addColorStop(0, '#ff2200');
+            baseGrad.addColorStop(0.3, '#ffaa00');
+            baseGrad.addColorStop(0.7, '#ffaa00');
+            baseGrad.addColorStop(1, '#ff2200');
+            ctx.fillStyle = baseGrad;
+            ctx.fillRect(0, 0, 512, 512);
+
+            // Overlapping smooth random noise blobs (No stripes, no seam artifacts)
+            for (let i = 0; i < 400; i++) {
+                const x = Math.random() * 512;
+                const y = Math.random() * 512;
+                const r = Math.random() * 45 + 10;
+                const blobGrad = ctx.createRadialGradient(x, y, 0, x, y, r);
+
+                const type = Math.random();
+                if (type < 0.5) {
+                    blobGrad.addColorStop(0, 'rgba(255, 240, 160, 0.85)');
+                    blobGrad.addColorStop(0.6, 'rgba(255, 150, 0, 0.4)');
+                } else if (type < 0.85) {
+                    blobGrad.addColorStop(0, 'rgba(204, 68, 0, 0.7)');
+                    blobGrad.addColorStop(0.7, 'rgba(255, 51, 0, 0.3)');
+                } else {
+                    blobGrad.addColorStop(0, 'rgba(50, 8, 0, 0.85)'); // Sunspots
+                    blobGrad.addColorStop(0.5, 'rgba(120, 20, 0, 0.4)');
+                }
+                blobGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+                ctx.fillStyle = blobGrad;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            return texture;
+        }
+
+        function createSunGlowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+            grad.addColorStop(0.2, 'rgba(255, 220, 100, 0.9)');
+            grad.addColorStop(0.5, 'rgba(255, 130, 0, 0.5)');
+            grad.addColorStop(0.75, 'rgba(255, 50, 0, 0.2)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 256, 256);
+            return new THREE.CanvasTexture(canvas);
+        }
+
         function createGlowingStarTexture() {
             const canvas = document.createElement('canvas');
             canvas.width = 64;
@@ -1004,93 +1069,8 @@
             return new THREE.CanvasTexture(canvas);
         }
 
-        function createProceduralPlanetTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 1024;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d');
 
-            const baseGrad = ctx.createLinearGradient(0, 0, 0, 512);
-            baseGrad.addColorStop(0, '#040d1a');
-            baseGrad.addColorStop(0.2, '#0a2342');
-            baseGrad.addColorStop(0.5, '#0d3866');
-            baseGrad.addColorStop(0.8, '#0a2342');
-            baseGrad.addColorStop(1, '#040d1a');
-            ctx.fillStyle = baseGrad;
-            ctx.fillRect(0, 0, 1024, 512);
-
-            for (let i = 0; i < 200; i++) {
-                const x = Math.random() * 1024;
-                const y = Math.random() * 512;
-                const r = Math.random() * 100 + 20;
-
-                const blobGrad = ctx.createRadialGradient(x, y, 0, x, y, r);
-                const colType = Math.random();
-                if (colType < 0.35) {
-                    blobGrad.addColorStop(0, 'rgba(16, 185, 129, 0.45)');
-                    blobGrad.addColorStop(0.7, 'rgba(5, 150, 105, 0.2)');
-                } else if (colType < 0.65) {
-                    blobGrad.addColorStop(0, 'rgba(217, 119, 6, 0.4)');
-                    blobGrad.addColorStop(0.8, 'rgba(180, 83, 9, 0.15)');
-                } else {
-                    blobGrad.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
-                    blobGrad.addColorStop(0.85, 'rgba(255, 255, 255, 0)');
-                }
-                blobGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-                ctx.fillStyle = blobGrad;
-                ctx.beginPath();
-                ctx.arc(x, y, r, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            const iceGradTop = ctx.createLinearGradient(0, 0, 0, 70);
-            iceGradTop.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-            iceGradTop.addColorStop(1, 'rgba(255, 255, 255, 0)');
-            ctx.fillStyle = iceGradTop;
-            ctx.fillRect(0, 0, 1024, 70);
-
-            const iceGradBot = ctx.createLinearGradient(0, 442, 0, 512);
-            iceGradBot.addColorStop(0, 'rgba(255, 255, 255, 0)');
-            iceGradBot.addColorStop(1, 'rgba(255, 255, 255, 0.95)');
-            ctx.fillStyle = iceGradBot;
-            ctx.fillRect(0, 442, 1024, 70);
-
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.ClampToEdgeWrapping;
-            return texture;
-        }
-
-        function createProceduralPlanetBumpMap() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 1024;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#808080';
-            ctx.fillRect(0, 0, 1024, 512);
-
-            for (let i = 0; i < 180; i++) {
-                const x = Math.random() * 1024;
-                const y = Math.random() * 512;
-                const r = Math.random() * 70 + 10;
-                const bumpGrad = ctx.createRadialGradient(x, y, 0, x, y, r);
-                bumpGrad.addColorStop(0, '#ffffff');
-                bumpGrad.addColorStop(0.7, '#a0a0a0');
-                bumpGrad.addColorStop(1, '#808080');
-                ctx.fillStyle = bumpGrad;
-                ctx.beginPath();
-                ctx.arc(x, y, r, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.ClampToEdgeWrapping;
-            return texture;
-        }
-
-        /* 2. HIGH-DENSITY MILKY WAY & STARFIELD ENGINE */
+        /* 2. THREE.JS ENGINE INIT */
         function initSciFiDeepSpaceEngine() {
             const container = document.getElementById('canvas-container');
 
@@ -1105,19 +1085,29 @@
             renderer.toneMappingExposure = 1.35;
             container.appendChild(renderer.domElement);
 
+            // OrbitControls
+            if (THREE.OrbitControls) {
+                orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+                orbitControls.enableDamping = true;
+                orbitControls.dampingFactor = 0.05;
+                orbitControls.enabled = false;
+                orbitControls.maxDistance = 150;
+                orbitControls.minDistance = 5;
+            }
+
             const starTexture = createGlowingStarTexture();
             const nebulaTexture = createNebulaPuffTexture();
 
-            // Astronomical Spectral Palette (Class O/B, A/F, G, M)
+            // Astronomical Spectral Palette
             const spectralColors = [
-                new THREE.Color(0x38bdf8), // Class O/B: Deep Cyan
-                new THREE.Color(0xe0f2fe), // Class A/F: White Cyan
-                new THREE.Color(0xfef08a), // Class G: Sun Yellow
-                new THREE.Color(0xf87171), // Class M: Orange Red
-                new THREE.Color(0xffffff)  // Pure White
+                new THREE.Color(0x38bdf8),
+                new THREE.Color(0xe0f2fe),
+                new THREE.Color(0xfef08a),
+                new THREE.Color(0xf87171),
+                new THREE.Color(0xffffff)
             ];
 
-            // 1. Group 1: Foreground Stars (500 stars, size 3.2, AdditiveBlending)
+            // 1. Group 1: Foreground Stars (500 stars)
             const fgGeo = new THREE.BufferGeometry();
             const fgPos = new Float32Array(500 * 3);
             const fgCol = new Float32Array(500 * 3);
@@ -1144,7 +1134,7 @@
             }));
             scene.add(fgStarPoints);
 
-            // 2. Group 2: Midground Stars (4,500 stars, size 1.6)
+            // 2. Group 2: Midground Stars (4,500 stars)
             const midGeo = new THREE.BufferGeometry();
             const midPos = new Float32Array(4500 * 3);
             const midCol = new Float32Array(4500 * 3);
@@ -1171,7 +1161,7 @@
             }));
             scene.add(midStarPoints);
 
-            // 3. Group 3: Deep Space Stars (15,000 micro stars, size 0.8)
+            // 3. Group 3: Deep Space Stars (15,000 micro stars)
             const deepGeo = new THREE.BufferGeometry();
             const deepPos = new Float32Array(15000 * 3);
             const deepCol = new Float32Array(15000 * 3);
@@ -1198,17 +1188,16 @@
             }));
             scene.add(deepStarPoints);
 
-            // 4. Milky Way Dust & Nebula Belt (2,500 large soft nebula particles at 45 degree tilt)
+            // 4. Milky Way Dust Belt
             const mwGeo = new THREE.BufferGeometry();
             const mwCount = 2500;
             const mwPos = new Float32Array(mwCount * 3);
             const mwCol = new Float32Array(mwCount * 3);
-
             const milkyWayPalette = [
-                new THREE.Color(0x06b6d4), // Cyan
-                new THREE.Color(0xa855f7), // Purple
-                new THREE.Color(0xec4899), // Magenta
-                new THREE.Color(0x3b82f6)  // Royal Blue
+                new THREE.Color(0x06b6d4),
+                new THREE.Color(0xa855f7),
+                new THREE.Color(0xec4899),
+                new THREE.Color(0x3b82f6)
             ];
 
             for (let i = 0; i < mwCount; i++) {
@@ -1216,7 +1205,6 @@
                 const spread = (Math.random() - 0.5) * 90;
                 const depth = (Math.random() - 0.5) * 150 - 40;
 
-                // 45 degree rotation
                 const x = dist * Math.cos(Math.PI / 4) - spread * Math.sin(Math.PI / 4);
                 const y = dist * Math.sin(Math.PI / 4) + spread * Math.cos(Math.PI / 4);
                 const z = depth;
@@ -1245,62 +1233,48 @@
             }));
             scene.add(milkyWayPoints);
 
-            // Photorealistic Planet
-            const planetGeo = new THREE.SphereGeometry(4.0, 64, 64);
-            const planetMap = createProceduralPlanetTexture();
-            const planetBump = createProceduralPlanetBumpMap();
+            // 5. SMOOTH GLOWING SUN (NO SPIKES, NO STRIPES)
+            const sunGroup = new THREE.Group();
+            sunGroup.position.set(4.2, -0.6, -1.5);
 
-            const planetMat = new THREE.MeshPhysicalMaterial({
-                map: planetMap,
-                bumpMap: planetBump,
-                bumpScale: 0.08,
-                roughness: 0.7,
-                metalness: 0.1,
-                clearcoat: 0.1,
-                clearcoatRoughness: 0.4
-            });
+            // Core Sun Sphere (SphereGeometry 3.2, 64, 64)
+            const sunGeo = new THREE.SphereGeometry(3.2, 64, 64);
+            const sunTexture = createCleanSunTexture();
+            const sunMat = new THREE.MeshBasicMaterial({ map: sunTexture });
+            glowingSunCore = new THREE.Mesh(sunGeo, sunMat);
+            sunGroup.add(glowingSunCore);
 
-            photorealisticPlanet = new THREE.Mesh(planetGeo, planetMat);
-            photorealisticPlanet.position.set(4.2, -0.6, -1.5);
-            photorealisticPlanet.rotation.z = 0.28;
-            scene.add(photorealisticPlanet);
-
-            // Atmosphere Fresnel Glow
-            const atmosphereShaderMat = new THREE.ShaderMaterial({
-                vertexShader: `
-                    varying vec3 vNormal;
-                    varying vec3 vPosition;
-                    void main() {
-                        vNormal = normalize(normalMatrix * normal);
-                        vPosition = (modelViewMatrix * vec4(position, 1.0)).xyz;
-                        gl_Position = projectionMatrix * vec4(vPosition, 1.0);
-                    }
-                `,
-                fragmentShader: `
-                    varying vec3 vNormal;
-                    varying vec3 vPosition;
-                    void main() {
-                        vec3 viewDir = normalize(-vPosition);
-                        float intensity = pow(0.68 - dot(vNormal, viewDir), 2.4);
-                        vec3 atmosphereColor = vec3(0.15, 0.65, 1.0);
-                        gl_FragColor = vec4(atmosphereColor, intensity * 0.85);
-                    }
-                `,
-                side: THREE.BackSide,
+            // Soft Radial Glow Sprite (100% Seamless Additive Glow, NO Spikes)
+            const glowTexture = createSunGlowTexture();
+            const sunGlowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: glowTexture,
+                transparent: true,
+                opacity: 0.95,
                 blending: THREE.AdditiveBlending,
-                transparent: true
-            });
+                depthWrite: false
+            }));
+            sunGlowSprite.scale.set(12, 12, 1);
+            sunGroup.add(sunGlowSprite);
 
-            const atmosphereGeo = new THREE.SphereGeometry(4.18, 64, 64);
-            atmosphereHaloMesh = new THREE.Mesh(atmosphereGeo, atmosphereShaderMat);
-            photorealisticPlanet.add(atmosphereHaloMesh);
+            // Soft Outer Halo Sprite
+            const outerGlowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: glowTexture,
+                transparent: true,
+                opacity: 0.5,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            }));
+            outerGlowSprite.scale.set(18, 18, 1);
+            sunGroup.add(outerGlowSprite);
 
-            // Solar Lighting
-            sunLight = new THREE.DirectionalLight(0xffffff, 3.8);
-            sunLight.position.set(22, 12, 18);
-            scene.add(sunLight);
+            // Point Light at Sun center
+            sunPointLight = new THREE.PointLight(0xffaa00, 5.0, 150);
+            sunGroup.add(sunPointLight);
 
-            const ambientLight = new THREE.AmbientLight(0x0a1628, 0.25);
+            scene.add(sunGroup);
+
+            // Ambient Light
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
             scene.add(ambientLight);
 
             document.addEventListener('mousemove', (e) => {
@@ -1322,12 +1296,12 @@
             requestAnimationFrame(animateDeepSpace);
             const elapsedTime = clock.getElapsedTime();
 
-            // Rotate Planet
-            if (photorealisticPlanet) {
-                photorealisticPlanet.rotation.y += 0.0012;
+            // Smooth Sun Rotation (No UV offset glitches)
+            if (glowingSunCore) {
+                glowingSunCore.rotation.y += 0.0015;
             }
 
-            // Real-Time Sinusoidal Star Twinkling Animation
+            // Starfield Twinkling Animation
             if (fgStarPoints) {
                 fgStarPoints.rotation.y += 0.0005;
                 fgStarPoints.material.opacity = 0.85 + Math.sin(elapsedTime * 3.5) * 0.15;
@@ -1340,15 +1314,18 @@
                 deepStarPoints.rotation.y += 0.0001;
             }
 
-            // Milky Way Dust Belt Subtle Drift
             if (milkyWayPoints) {
                 milkyWayPoints.rotation.z += 0.00015;
             }
 
-            // Smooth Camera Parallax Motion
-            camera.position.x += (mouseX * 18 - camera.position.x) * 0.05;
-            camera.position.y += (-mouseY * 18 - camera.position.y) * 0.05;
-            camera.lookAt(scene.position);
+            // OrbitControls update if enabled, else smooth parallax
+            if (orbitControls && orbitControls.enabled) {
+                orbitControls.update();
+            } else {
+                camera.position.x += (mouseX * 18 - camera.position.x) * 0.05;
+                camera.position.y += (-mouseY * 18 - camera.position.y) * 0.05;
+                camera.lookAt(scene.position);
+            }
 
             renderer.render(scene, camera);
         }
@@ -1356,7 +1333,7 @@
         window.addEventListener('DOMContentLoaded', initSciFiDeepSpaceEngine);
 
 
-        /* STATE, THEME, TRANSLUCENCY & ZEN MODE */
+        /* STATE, THEME, TRANSLUCENCY & ZEN MODE WITH ORBIT CONTROLS */
         let appState = {
             models: [],
             settings: {},
@@ -1380,7 +1357,7 @@
                 body.classList.add('ultra-translucent');
                 btnText.textContent = 'Rõ Nền 3D';
                 btnIcon.className = 'fa-solid fa-eye';
-                showToast('Đã bật chế độ Siêu Mờ (Nhìn rõ nền 3D)');
+                showToast('Đã bật chế độ Siêu Mờ (Nhìn rõ Mặt Trời & Nền 3D)');
             } else {
                 body.classList.remove('ultra-translucent');
                 btnText.textContent = 'Mờ UI';
@@ -1411,16 +1388,28 @@
         function toggleZenMode() {
             appState.isZenMode = !appState.isZenMode;
             const appContainer = document.getElementById('app-container');
+            const canvasContainer = document.getElementById('canvas-container');
             const restoreBtn = document.getElementById('zen-restore-btn');
 
             if (appState.isZenMode) {
                 appContainer.classList.add('zen-hidden');
+                canvasContainer.style.pointerEvents = 'auto';
                 restoreBtn.style.display = 'flex';
-                showToast('Đã kích hoạt Chế độ Ngắm Dải Ngân Hà 3D (ESC)');
+                if (orbitControls) {
+                    orbitControls.enabled = true;
+                }
+                showToast('Đã mở 3D Interactive Zen Mode! Kéo chuột để xoay 360° Mặt Trời & Cuộn để Zoom.');
             } else {
                 appContainer.classList.remove('zen-hidden');
+                canvasContainer.style.pointerEvents = 'none';
                 restoreBtn.style.display = 'none';
-                showToast('Đã hiện lại giao diện điều khiển');
+                if (orbitControls) {
+                    orbitControls.enabled = false;
+                    orbitControls.reset();
+                }
+                camera.position.set(0, 0, 16);
+                camera.lookAt(0, 0, 0);
+                showToast('Đã khóa góc nhìn chuẩn & Hiện lại giao diện');
             }
         }
 
