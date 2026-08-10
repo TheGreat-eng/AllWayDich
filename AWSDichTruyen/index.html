@@ -14,7 +14,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         :root {
-            /* Deep Space Sci-Fi Color Tokens */
+            /* Deep Space Sci-Fi Color Tokens (Default Dark) */
             --bg-body: #02040a;
             --glass-bg: rgba(8, 15, 30, 0.45);
             --glass-card-bg: rgba(10, 20, 40, 0.6);
@@ -22,6 +22,7 @@
             --glass-border: rgba(56, 189, 248, 0.28);
             --glass-border-bright: rgba(192, 132, 252, 0.55);
             --glass-hover: rgba(56, 189, 248, 0.18);
+            --glass-blur: 28px;
             --accent-cyan: #38bdf8;
             --accent-purple: #c084fc;
             --accent-magenta: #f43f5e;
@@ -34,6 +35,7 @@
             --font-mono: 'JetBrains Mono', monospace;
         }
 
+        /* Light Theme Tokens */
         body.light-theme {
             --bg-body: #f1f5f9;
             --glass-bg: rgba(255, 255, 255, 0.8);
@@ -50,6 +52,23 @@
             --accent-red: #dc2626;
             --text-main: #0f172a;
             --text-sub: #334155;
+        }
+
+        /* Ultra-Translucent Sheer Glass Mode (Nhìn xuyên nền 3D cực rõ) */
+        body.ultra-translucent {
+            --glass-bg: rgba(6, 12, 26, 0.18) !important;
+            --glass-card-bg: rgba(8, 16, 32, 0.22) !important;
+            --glass-input-bg: rgba(3, 7, 18, 0.35) !important;
+            --glass-blur: 8px !important;
+            --glass-border: rgba(56, 189, 248, 0.45) !important;
+        }
+
+        body.light-theme.ultra-translucent {
+            --glass-bg: rgba(255, 255, 255, 0.35) !important;
+            --glass-card-bg: rgba(255, 255, 255, 0.4) !important;
+            --glass-input-bg: rgba(241, 245, 249, 0.5) !important;
+            --glass-blur: 8px !important;
+            --glass-border: rgba(2, 132, 199, 0.45) !important;
         }
 
         * {
@@ -133,21 +152,21 @@
             box-shadow: 0 12px 45px rgba(56, 189, 248, 0.8), 0 0 35px rgba(192, 132, 252, 0.9);
         }
 
-        /* Sci-Fi Header Navigation Bar */
+        /* Header Navigation Bar */
         header {
             display: flex;
             align-items: center;
             justify-content: space-between;
             background: var(--glass-bg);
-            backdrop-filter: blur(28px) saturate(210%);
-            -webkit-backdrop-filter: blur(28px) saturate(210%);
+            backdrop-filter: blur(var(--glass-blur)) saturate(210%);
+            -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(210%);
             border: 1px solid var(--glass-border);
             border-radius: 20px;
             padding: 10px 22px;
             box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
             gap: 14px;
             flex-wrap: wrap;
-            transition: all 0.3s ease;
+            transition: all 0.35s ease;
         }
 
         header:hover {
@@ -188,7 +207,6 @@
             text-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
         }
 
-        /* Navigation Sci-Fi Glass Tabs */
         .nav-tabs {
             display: flex;
             gap: 6px;
@@ -227,7 +245,6 @@
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
         }
 
-        /* Header Control Panel (API Key & Model) */
         .header-inputs {
             display: flex;
             align-items: center;
@@ -304,7 +321,6 @@
             color: #ffffff;
         }
 
-        /* Main View Container */
         .main-content {
             flex: 1;
             display: flex;
@@ -324,11 +340,11 @@
             display: flex;
         }
 
-        /* Frosted Holographic Glass Card Styling */
+        /* Frosted Glass Card Styling */
         .glass-card {
             background: var(--glass-card-bg);
-            backdrop-filter: blur(28px) saturate(210%);
-            -webkit-backdrop-filter: blur(28px) saturate(210%);
+            backdrop-filter: blur(var(--glass-blur)) saturate(210%);
+            -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(210%);
             border: 1px solid var(--glass-border);
             border-radius: 20px;
             padding: 16px;
@@ -382,7 +398,7 @@
             flex: 1;
             width: 100%;
             background: var(--glass-input-bg);
-            backdrop-filter: blur(14px);
+            backdrop-filter: blur(var(--glass-blur));
             border: 1px solid var(--glass-border);
             border-radius: 14px;
             padding: 16px;
@@ -424,7 +440,6 @@
             gap: 8px;
         }
 
-        /* Vibrant Sci-Fi Action Translate Button */
         .btn-translate {
             width: 100%;
             padding: 16px;
@@ -579,7 +594,7 @@
         .log-console {
             flex: 1;
             background: var(--glass-input-bg);
-            backdrop-filter: blur(20px);
+            backdrop-filter: blur(var(--glass-blur));
             border: 1px solid var(--glass-border);
             border-radius: 14px;
             padding: 14px;
@@ -706,12 +721,12 @@
                 </div>
             </nav>
 
-            <!-- Header Controls: API Key, Model Select & Zen Mode / Theme -->
+            <!-- Header Controls: API Key, Model Select & Zen Mode / Theme / Translucency -->
             <div class="header-inputs">
                 <div class="header-input-item">
                     <span class="header-input-label"><i class="fa-solid fa-key"></i> API Key:</span>
                     <div class="custom-input-box">
-                        <input type="password" id="header-api-key" class="custom-input" placeholder="ABSK... (nhập Key)" style="width: 190px;" onchange="syncApiKey(this.value)">
+                        <input type="password" id="header-api-key" class="custom-input" placeholder="ABSK... (nhập Key)" style="width: 170px;" onchange="syncApiKey(this.value)">
                         <i class="fa-solid fa-eye input-icon-btn" onclick="toggleApiKeyVisibility('header-api-key', this)"></i>
                     </div>
                 </div>
@@ -721,10 +736,17 @@
                     <select id="header-model-select" class="custom-select" onchange="onModelChange(this.value)"></select>
                 </div>
 
+                <!-- Chế Độ Mờ UI (Ultra-Translucent Glass Mode) -->
+                <button class="btn-action-secondary" id="translucent-toggle-btn" onclick="toggleGlassTranslucency()" title="Bật / Tắt Chế Độ Mờ UI để nhìn rõ nền 3D">
+                    <i class="fa-solid fa-droplet"></i> <span id="translucent-btn-text">Mờ UI</span>
+                </button>
+
+                <!-- Theme Light/Dark Toggle -->
                 <button class="btn-action-secondary" id="theme-toggle-btn" onclick="toggleTheme()" title="Chuyển chế độ Sáng / Tối">
                     <i class="fa-solid fa-moon"></i> <span id="theme-btn-text">Tối</span>
                 </button>
 
+                <!-- Zen View Mode Toggle -->
                 <button class="btn-action-secondary" onclick="toggleZenMode()" title="Ẩn giao diện ngắm nền 3D">
                     <i class="fa-solid fa-eye-slash"></i> <span>Ẩn UI</span>
                 </button>
@@ -957,14 +979,12 @@
         function initSciFiDeepSpaceEngine() {
             const container = document.getElementById('canvas-container');
             
-            // 1. Scene & Camera Setup
             scene = new THREE.Scene();
             scene.fog = new THREE.FogExp2(0x02040a, 0.0012);
 
             camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 0, 16);
 
-            // 2. High-Performance WebGL Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -972,18 +992,17 @@
             renderer.toneMappingExposure = 1.25;
             container.appendChild(renderer.domElement);
 
-            // 3. Multi-Layered Deep Space Starfield (Real 3D Perspective)
             const starGeometry = new THREE.BufferGeometry();
             const starCount = 5000;
             const starPositions = new Float32Array(starCount * 3);
             const starColors = new Float32Array(starCount * 3);
 
             const starPalette = [
-                new THREE.Color(0x38bdf8), // Cyan
-                new THREE.Color(0xc084fc), // Purple
-                new THREE.Color(0xf43f5e), // Deep Pink
-                new THREE.Color(0x34d399), // Emerald Green
-                new THREE.Color(0xffffff)  // Pure White
+                new THREE.Color(0x38bdf8),
+                new THREE.Color(0xc084fc),
+                new THREE.Color(0xf43f5e),
+                new THREE.Color(0x34d399),
+                new THREE.Color(0xffffff)
             ];
 
             for (let i = 0; i < starCount * 3; i += 3) {
@@ -1010,7 +1029,6 @@
             deepStarfield = new THREE.Points(starGeometry, starMaterial);
             scene.add(deepStarfield);
 
-            // 4. Volumetric Deep Space Gas Nebula Clouds
             const nebulaColors = [0x38bdf8, 0x7c3aed, 0xe11d48, 0x0284c7];
             for (let i = 0; i < 6; i++) {
                 const cloudGeo = new THREE.SphereGeometry(12 + Math.random() * 8, 32, 32);
@@ -1030,11 +1048,9 @@
                 nebulaClouds.push(cloud);
             }
 
-            // 5. THE CRYSTAL NUCLEUS (Multi-faceted 3D Core)
             const crystalGroup = new THREE.Group();
             crystalGroup.position.set(4.2, -0.8, -1.5);
 
-            // Outer Faceted Metallic Crystal Body
             const facetGeo = new THREE.IcosahedronGeometry(3.5, 1);
             const facetMat = new THREE.MeshStandardMaterial({
                 color: 0x091428,
@@ -1047,7 +1063,6 @@
             crystalNucleus = new THREE.Mesh(facetGeo, facetMat);
             crystalGroup.add(crystalNucleus);
 
-            // Inner Bioluminescent Pulsing Glow Core
             const coreGeo = new THREE.IcosahedronGeometry(2.7, 2);
             const coreMat = new THREE.MeshBasicMaterial({
                 color: 0x00f0ff,
@@ -1058,7 +1073,6 @@
             innerGlowCore = new THREE.Mesh(coreGeo, coreMat);
             crystalGroup.add(innerGlowCore);
 
-            // Delicate Exoskeleton Wireframe Cage
             const cageGeo = new THREE.IcosahedronGeometry(3.75, 2);
             const cageMat = new THREE.MeshBasicMaterial({
                 color: 0xc084fc,
@@ -1069,7 +1083,6 @@
             wireframeExoCage = new THREE.Mesh(cageGeo, cageMat);
             crystalGroup.add(wireframeExoCage);
 
-            // Sci-Fi Orbital Energy Rings (Energy Veins)
             for (let r = 0; r < 2; r++) {
                 const ringGeo = new THREE.TorusGeometry(4.3 + r * 0.4, 0.03, 16, 100);
                 const ringMat = new THREE.MeshBasicMaterial({
@@ -1086,27 +1099,22 @@
 
             scene.add(crystalGroup);
 
-            // 6. Directional Source Lighting & Shadows
             const ambientLight = new THREE.AmbientLight(0x0f172a, 1.5);
             scene.add(ambientLight);
 
-            // Angled Key Light (Specular Reflection)
             const keyLight = new THREE.DirectionalLight(0x38bdf8, 4.0);
             keyLight.position.set(16, 14, 12);
             scene.add(keyLight);
 
-            // Purple Accent Point Light
             const purpleLight = new THREE.PointLight(0xc084fc, 4.5, 50);
             purpleLight.position.set(-12, -8, 6);
             scene.add(purpleLight);
 
-            // Back Rim Highlight Spot Light
             const rimLight = new THREE.SpotLight(0xf43f5e, 6.0);
             rimLight.position.set(0, 5, -15);
             rimLight.lookAt(crystalGroup.position);
             scene.add(rimLight);
 
-            // Mouse Interactive Tilt Listener
             document.addEventListener('mousemove', (e) => {
                 mouseX = (e.clientX - window.innerWidth / 2) * 0.0006;
                 mouseY = (e.clientY - window.innerHeight / 2) * 0.0006;
@@ -1126,14 +1134,12 @@
             requestAnimationFrame(animateDeepSpace);
             const elapsedTime = clock.getElapsedTime();
 
-            // Rotate Crystal Nucleus & Components
             if (crystalNucleus) {
                 crystalNucleus.rotation.y += 0.004;
                 crystalNucleus.rotation.x += 0.002;
             }
             if (innerGlowCore) {
                 innerGlowCore.rotation.y -= 0.006;
-                // Pulsing inner glow using sine wave
                 const pulse = 0.75 + Math.sin(elapsedTime * 2.5) * 0.2;
                 innerGlowCore.material.opacity = pulse;
             }
@@ -1142,19 +1148,16 @@
                 wireframeExoCage.rotation.z += 0.001;
             }
 
-            // Rotate Energy Rings
             energyRings.forEach((ring, idx) => {
                 ring.rotation.z += 0.005 * (idx + 1);
                 ring.rotation.x += 0.002 * (idx + 1);
             });
 
-            // Slowly drift Starfield and Nebula Clouds
             if (deepStarfield) deepStarfield.rotation.y += 0.0003;
             nebulaClouds.forEach((cloud, idx) => {
                 cloud.rotation.y += 0.0005 * (idx % 2 === 0 ? 1 : -1);
             });
 
-            // Smooth 3D Camera Parallax (Cockpit Window feel)
             camera.position.x += (mouseX * 18 - camera.position.x) * 0.05;
             camera.position.y += (-mouseY * 18 - camera.position.y) * 0.05;
             camera.lookAt(scene.position);
@@ -1165,7 +1168,7 @@
         window.addEventListener('DOMContentLoaded', initSciFiDeepSpaceEngine);
 
 
-        /* ================= STATE, THEME & ZEN MODE ================= */
+        /* ================= STATE, THEME, TRANSLUCENCY & ZEN MODE ================= */
         let appState = {
             models: [],
             settings: {},
@@ -1175,8 +1178,28 @@
             inputFile: "",
             outputFile: "",
             isThemeLight: false,
+            isTranslucent: false,
             isZenMode: false
         };
+
+        function toggleGlassTranslucency() {
+            appState.isTranslucent = !appState.isTranslucent;
+            const body = document.body;
+            const btnText = document.getElementById('translucent-btn-text');
+            const btnIcon = document.querySelector('#translucent-toggle-btn i');
+
+            if (appState.isTranslucent) {
+                body.classList.add('ultra-translucent');
+                btnText.textContent = 'Rõ Nền 3D';
+                btnIcon.className = 'fa-solid fa-eye';
+                showToast('Đã bật chế độ Siêu Mờ (Nhìn rõ nền 3D)');
+            } else {
+                body.classList.remove('ultra-translucent');
+                btnText.textContent = 'Mờ UI';
+                btnIcon.className = 'fa-solid fa-droplet';
+                showToast('Đã trở về chế độ Kính tiêu chuẩn');
+            }
+        }
 
         function toggleTheme() {
             appState.isThemeLight = !appState.isThemeLight;
