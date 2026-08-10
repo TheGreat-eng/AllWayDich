@@ -3,25 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AWSDichTruyen 3D Studio - Frosted Glass Edition</title>
+    <title>AWSDichTruyen 3D Studio - Sci-Fi Crystal Core</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome CDN -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Three.js CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         :root {
-            /* Dark Theme Tokens (Default) */
-            --bg-body: #030712;
-            --glass-bg: rgba(15, 23, 42, 0.4);
-            --glass-card-bg: rgba(15, 23, 42, 0.55);
-            --glass-input-bg: rgba(3, 7, 18, 0.6);
-            --glass-border: rgba(255, 255, 255, 0.24);
-            --glass-border-bright: rgba(255, 255, 255, 0.45);
-            --glass-hover: rgba(255, 255, 255, 0.16);
+            /* Deep Space Sci-Fi Color Tokens */
+            --bg-body: #02040a;
+            --glass-bg: rgba(8, 15, 30, 0.45);
+            --glass-card-bg: rgba(10, 20, 40, 0.6);
+            --glass-input-bg: rgba(4, 9, 20, 0.75);
+            --glass-border: rgba(56, 189, 248, 0.28);
+            --glass-border-bright: rgba(192, 132, 252, 0.55);
+            --glass-hover: rgba(56, 189, 248, 0.18);
             --accent-cyan: #38bdf8;
             --accent-purple: #c084fc;
             --accent-magenta: #f43f5e;
@@ -29,19 +29,18 @@
             --accent-green: #34d399;
             --accent-red: #f87171;
             --text-main: #ffffff;
-            --text-sub: #cbd5e1;
+            --text-sub: #94a3b8;
             --font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
             --font-mono: 'JetBrains Mono', monospace;
         }
 
-        /* Light Theme Tokens */
         body.light-theme {
-            --bg-body: #f8fafc;
-            --glass-bg: rgba(255, 255, 255, 0.75);
-            --glass-card-bg: rgba(255, 255, 255, 0.82);
-            --glass-input-bg: rgba(241, 245, 249, 0.9);
-            --glass-border: rgba(15, 23, 42, 0.18);
-            --glass-border-bright: rgba(15, 23, 42, 0.35);
+            --bg-body: #f1f5f9;
+            --glass-bg: rgba(255, 255, 255, 0.8);
+            --glass-card-bg: rgba(255, 255, 255, 0.88);
+            --glass-input-bg: rgba(241, 245, 249, 0.95);
+            --glass-border: rgba(2, 132, 199, 0.25);
+            --glass-border-bright: rgba(124, 58, 237, 0.45);
             --glass-hover: rgba(0, 0, 0, 0.08);
             --accent-cyan: #0284c7;
             --accent-purple: #7c3aed;
@@ -93,44 +92,48 @@
             padding: 16px;
             gap: 14px;
             perspective: 1200px;
-            transition: opacity 0.5s ease;
+            transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s ease;
         }
 
         /* Zen Mode - Hide UI Overlay */
         #app-container.zen-hidden {
             opacity: 0;
             pointer-events: none;
+            transform: scale(0.98);
         }
 
-        /* Floating Restore Button for Zen Mode */
+        /* Sci-Fi Holographic Restore Button for Zen Mode */
         #zen-restore-btn {
             position: fixed;
-            bottom: 24px;
+            bottom: 28px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
-            background: rgba(15, 23, 42, 0.85);
-            backdrop-filter: blur(20px);
+            background: rgba(8, 15, 30, 0.75);
+            backdrop-filter: blur(24px) saturate(220%);
+            -webkit-backdrop-filter: blur(24px) saturate(220%);
             border: 1px solid var(--accent-cyan);
             color: #ffffff;
-            padding: 12px 24px;
+            padding: 12px 28px;
             border-radius: 30px;
-            font-weight: 700;
+            font-weight: 800;
             font-size: 0.95rem;
+            letter-spacing: 0.5px;
             cursor: pointer;
             display: none;
             align-items: center;
-            gap: 10px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.5);
-            transition: all 0.3s ease;
+            gap: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7), 0 0 25px rgba(56, 189, 248, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         #zen-restore-btn:hover {
-            transform: translateX(-50%) scale(1.06);
-            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            transform: translateX(-50%) scale(1.08);
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.9), rgba(168, 85, 247, 0.9));
+            box-shadow: 0 12px 45px rgba(56, 189, 248, 0.8), 0 0 35px rgba(192, 132, 252, 0.9);
         }
 
-        /* Premium Header Navigation Bar */
+        /* Sci-Fi Header Navigation Bar */
         header {
             display: flex;
             align-items: center;
@@ -140,50 +143,56 @@
             -webkit-backdrop-filter: blur(28px) saturate(210%);
             border: 1px solid var(--glass-border);
             border-radius: 20px;
-            padding: 10px 20px;
-            box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+            padding: 10px 22px;
+            box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
             gap: 14px;
             flex-wrap: wrap;
             transition: all 0.3s ease;
         }
 
+        header:hover {
+            border-color: var(--glass-border-bright);
+            box-shadow: 0 12px 45px 0 rgba(56, 189, 248, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
+        }
+
         .brand {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
 
         .brand-icon {
-            width: 42px;
-            height: 42px;
+            width: 44px;
+            height: 44px;
             background: linear-gradient(135deg, #06b6d4, #a855f7, #ec4899);
-            border-radius: 12px;
+            border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 22px;
             color: #ffffff;
-            box-shadow: 0 0 20px rgba(56, 189, 248, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 22px rgba(56, 189, 248, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.9);
             animation: pulse-logo 3s infinite ease-in-out;
         }
 
         @keyframes pulse-logo {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(56, 189, 248, 0.6); }
-            50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(192, 132, 252, 0.9); }
+            0%, 100% { transform: scale(1); box-shadow: 0 0 22px rgba(56, 189, 248, 0.7); }
+            50% { transform: scale(1.05); box-shadow: 0 0 32px rgba(192, 132, 252, 0.95); }
         }
 
         .brand-title {
-            font-size: 1.3rem;
+            font-size: 1.35rem;
             font-weight: 800;
             color: var(--text-main);
-            letter-spacing: 0.5px;
+            letter-spacing: 0.6px;
+            text-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
         }
 
-        /* Navigation Glass Tabs */
+        /* Navigation Sci-Fi Glass Tabs */
         .nav-tabs {
             display: flex;
             gap: 6px;
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(0, 0, 0, 0.25);
             padding: 4px;
             border-radius: 14px;
             border: 1px solid var(--glass-border);
@@ -206,6 +215,7 @@
         .nav-tab:hover {
             color: var(--text-main);
             background: var(--glass-hover);
+            border-color: rgba(255, 255, 255, 0.2);
         }
 
         .nav-tab.active {
@@ -222,7 +232,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            background: rgba(0, 0, 0, 0.15);
+            background: rgba(0, 0, 0, 0.2);
             backdrop-filter: blur(16px);
             padding: 6px 12px;
             border-radius: 14px;
@@ -314,24 +324,24 @@
             display: flex;
         }
 
-        /* Frosted Glass Card Styling */
+        /* Frosted Holographic Glass Card Styling */
         .glass-card {
             background: var(--glass-card-bg);
-            backdrop-filter: blur(24px) saturate(200%);
-            -webkit-backdrop-filter: blur(24px) saturate(200%);
+            backdrop-filter: blur(28px) saturate(210%);
+            -webkit-backdrop-filter: blur(28px) saturate(210%);
             border: 1px solid var(--glass-border);
             border-radius: 20px;
             padding: 16px;
             display: flex;
             flex-direction: column;
             gap: 12px;
-            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.25);
             transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .glass-card:hover {
             border-color: var(--glass-border-bright);
-            box-shadow: 0 16px 50px 0 rgba(56, 189, 248, 0.25);
+            box-shadow: 0 16px 50px 0 rgba(56, 189, 248, 0.28);
             transform: translateY(-2px);
         }
 
@@ -362,7 +372,7 @@
             font-size: 0.8rem;
             font-weight: 600;
             color: var(--accent-cyan);
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(0, 0, 0, 0.25);
             padding: 4px 10px;
             border-radius: 8px;
             border: 1px solid var(--glass-border);
@@ -372,7 +382,7 @@
             flex: 1;
             width: 100%;
             background: var(--glass-input-bg);
-            backdrop-filter: blur(12px);
+            backdrop-filter: blur(14px);
             border: 1px solid var(--glass-border);
             border-radius: 14px;
             padding: 16px;
@@ -388,7 +398,7 @@
 
         .editor-textarea:focus {
             border-color: var(--accent-cyan);
-            box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+            box-shadow: 0 0 22px rgba(56, 189, 248, 0.35);
         }
 
         .control-toolbar {
@@ -414,7 +424,7 @@
             gap: 8px;
         }
 
-        /* Vibrant Action Translate Button */
+        /* Vibrant Sci-Fi Action Translate Button */
         .btn-translate {
             width: 100%;
             padding: 16px;
@@ -445,7 +455,7 @@
 
         .btn-translate:hover {
             transform: translateY(-3px) scale(1.02);
-            box-shadow: 0 10px 35px rgba(56, 189, 248, 0.8);
+            box-shadow: 0 10px 35px rgba(56, 189, 248, 0.85);
         }
 
         .btn-action-secondary {
@@ -511,7 +521,7 @@
         .progress-bar-wrapper {
             width: 100%;
             height: 16px;
-            background: rgba(0, 0, 0, 0.3);
+            background: rgba(0, 0, 0, 0.35);
             border-radius: 10px;
             overflow: hidden;
             border: 1px solid var(--glass-border);
@@ -662,9 +672,10 @@
     <!-- 3D Canvas Background -->
     <div id="canvas-container"></div>
 
-    <!-- Zen View Restoration Button -->
+    <!-- Sci-Fi Holographic Zen View Restoration Button -->
     <div id="zen-restore-btn" onclick="toggleZenMode()">
-        <i class="fa-solid fa-eye"></i> <span>Hiện Giao Diện (ESC)</span>
+        <i class="fa-solid fa-atom fa-spin" style="color: var(--accent-cyan);"></i>
+        <span>Hiện Giao Diện (ESC)</span>
     </div>
 
     <!-- Main Glassmorphism UI Overlay -->
@@ -672,8 +683,8 @@
         <!-- Header Navigation Bar -->
         <header>
             <div class="brand">
-                <div class="brand-icon"><i class="fa-solid fa-robot"></i></div>
-                <div class="brand-title">AWSDichTruyen 3D</div>
+                <div class="brand-icon"><i class="fa-solid fa-atom"></i></div>
+                <div class="brand-title">AWSDichTruyen 3D Studio</div>
             </div>
 
             <!-- Navigation Tabs -->
@@ -710,7 +721,6 @@
                     <select id="header-model-select" class="custom-select" onchange="onModelChange(this.value)"></select>
                 </div>
 
-                <!-- Theme Light/Dark Toggle & Zen Mode Toggle -->
                 <button class="btn-action-secondary" id="theme-toggle-btn" onclick="toggleTheme()" title="Chuyển chế độ Sáng / Tối">
                     <i class="fa-solid fa-moon"></i> <span id="theme-btn-text">Tối</span>
                 </button>
@@ -726,7 +736,6 @@
 
             <!-- TAB 1: DIRECT TEXT TRANSLATION -->
             <div id="direct-tab" class="tab-panel active">
-                <!-- Left Column: Source Text -->
                 <div class="editor-column glass-card">
                     <div class="column-header">
                         <div class="column-title"><i class="fa-solid fa-file-pen" style="color: var(--accent-cyan);"></i> Văn Bản Gốc</div>
@@ -738,7 +747,6 @@
                     <textarea id="source-text" class="editor-textarea" placeholder="Nhập hoặc dán nội dung văn bản / chương truyện gốc vào đây..." oninput="updateCharCount()"></textarea>
                 </div>
 
-                <!-- Middle Toolbar: Controls -->
                 <div class="control-toolbar glass-card">
                     <div class="input-group">
                         <label class="input-label"><i class="fa-solid fa-language" style="color: var(--accent-cyan);"></i> Ngôn Ngữ Đích</label>
@@ -766,7 +774,6 @@
                     </div>
                 </div>
 
-                <!-- Right Column: Translated Text Output -->
                 <div class="editor-column glass-card">
                     <div class="column-header">
                         <div class="column-title"><i class="fa-solid fa-circle-check" style="color: var(--accent-green);"></i> Bản Dịch (Kết Quả)</div>
@@ -821,7 +828,6 @@
                         </div>
                     </div>
 
-                    <!-- 6 Frosted Glass Statistics Panels -->
                     <div class="stats-grid">
                         <div class="stat-box">
                             <span class="stat-label"><i class="fa-solid fa-clock"></i> Thời gian</span>
@@ -940,131 +946,174 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <!-- 3D Scene Script & Frontend JS -->
+    <!-- 3D REAL-TIME DEEP SPACE CRYSTAL NUCLEUS ENGINE -->
     <script>
-        /* ================= 1. VIBRANT COSMIC NEBULA & 3D PLANET BACKGROUND ================= */
-        let scene, camera, renderer, starfield, planet, crystalShell, atmosphereHalo;
+        let scene, camera, renderer;
+        let crystalNucleus, innerGlowCore, wireframeExoCage, energyRings = [];
+        let deepStarfield, nebulaClouds = [];
         let mouseX = 0, mouseY = 0;
+        let clock = new THREE.Clock();
 
-        function init3DVibrantCosmos() {
+        function initSciFiDeepSpaceEngine() {
             const container = document.getElementById('canvas-container');
             
+            // 1. Scene & Camera Setup
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.z = 15;
+            scene.fog = new THREE.FogExp2(0x02040a, 0.0012);
 
+            camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 16);
+
+            // 2. High-Performance WebGL Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.25;
             container.appendChild(renderer.domElement);
 
+            // 3. Multi-Layered Deep Space Starfield (Real 3D Perspective)
             const starGeometry = new THREE.BufferGeometry();
-            const starCount = 4200;
+            const starCount = 5000;
             const starPositions = new Float32Array(starCount * 3);
             const starColors = new Float32Array(starCount * 3);
 
-            const vibrantColors = [
-                new THREE.Color(0x38bdf8),
-                new THREE.Color(0xc084fc),
-                new THREE.Color(0xf43f5e),
-                new THREE.Color(0xfacc15),
-                new THREE.Color(0xffffff)
+            const starPalette = [
+                new THREE.Color(0x38bdf8), // Cyan
+                new THREE.Color(0xc084fc), // Purple
+                new THREE.Color(0xf43f5e), // Deep Pink
+                new THREE.Color(0x34d399), // Emerald Green
+                new THREE.Color(0xffffff)  // Pure White
             ];
 
             for (let i = 0; i < starCount * 3; i += 3) {
-                starPositions[i] = (Math.random() - 0.5) * 220;
-                starPositions[i + 1] = (Math.random() - 0.5) * 220;
-                starPositions[i + 2] = (Math.random() - 0.5) * 220;
+                starPositions[i] = (Math.random() - 0.5) * 260;
+                starPositions[i + 1] = (Math.random() - 0.5) * 260;
+                starPositions[i + 2] = (Math.random() - 0.5) * 260;
 
-                const col = vibrantColors[Math.floor(Math.random() * vibrantColors.length)];
-                starColors[i] = col.r;
-                starColors[i + 1] = col.g;
-                starColors[i + 2] = col.b;
+                const c = starPalette[Math.floor(Math.random() * starPalette.length)];
+                starColors[i] = c.r;
+                starColors[i + 1] = c.g;
+                starColors[i + 2] = c.b;
             }
 
             starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
             starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
 
             const starMaterial = new THREE.PointsMaterial({
-                size: 0.95,
+                size: 0.9,
                 vertexColors: true,
                 transparent: true,
-                opacity: 0.9
+                opacity: 0.95
             });
 
-            starfield = new THREE.Points(starGeometry, starMaterial);
-            scene.add(starfield);
+            deepStarfield = new THREE.Points(starGeometry, starMaterial);
+            scene.add(deepStarfield);
 
-            const planetGeo = new THREE.SphereGeometry(3.6, 64, 64);
-            const canvas = document.createElement('canvas');
-            canvas.width = 1024;
-            canvas.height = 1024;
-            const ctx = canvas.getContext('2d');
-            
-            const grad = ctx.createRadialGradient(512, 512, 50, 512, 512, 512);
-            grad.addColorStop(0, '#38bdf8');
-            grad.addColorStop(0.3, '#7e22ce');
-            grad.addColorStop(0.6, '#be185d');
-            grad.addColorStop(1, '#090d16');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 1024, 1024);
-
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-            for (let i = 0; i < 35; i++) {
-                ctx.beginPath();
-                ctx.arc(Math.random() * 1024, Math.random() * 1024, Math.random() * 120 + 30, 0, Math.PI * 2);
-                ctx.fill();
+            // 4. Volumetric Deep Space Gas Nebula Clouds
+            const nebulaColors = [0x38bdf8, 0x7c3aed, 0xe11d48, 0x0284c7];
+            for (let i = 0; i < 6; i++) {
+                const cloudGeo = new THREE.SphereGeometry(12 + Math.random() * 8, 32, 32);
+                const cloudMat = new THREE.MeshBasicMaterial({
+                    color: nebulaColors[i % nebulaColors.length],
+                    transparent: true,
+                    opacity: 0.08 + Math.random() * 0.06,
+                    wireframe: true
+                });
+                const cloud = new THREE.Mesh(cloudGeo, cloudMat);
+                cloud.position.set(
+                    (Math.random() - 0.5) * 80,
+                    (Math.random() - 0.5) * 80,
+                    -40 - Math.random() * 40
+                );
+                scene.add(cloud);
+                nebulaClouds.push(cloud);
             }
 
-            const planetTexture = new THREE.CanvasTexture(canvas);
-            const planetMat = new THREE.MeshPhongMaterial({
-                map: planetTexture,
-                shininess: 70,
-                specular: 0x38bdf8
+            // 5. THE CRYSTAL NUCLEUS (Multi-faceted 3D Core)
+            const crystalGroup = new THREE.Group();
+            crystalGroup.position.set(4.2, -0.8, -1.5);
+
+            // Outer Faceted Metallic Crystal Body
+            const facetGeo = new THREE.IcosahedronGeometry(3.5, 1);
+            const facetMat = new THREE.MeshStandardMaterial({
+                color: 0x091428,
+                roughness: 0.18,
+                metalness: 0.85,
+                flatShading: true,
+                emissive: 0x0284c7,
+                emissiveIntensity: 0.25
             });
+            crystalNucleus = new THREE.Mesh(facetGeo, facetMat);
+            crystalGroup.add(crystalNucleus);
 
-            planet = new THREE.Mesh(planetGeo, planetMat);
-            planet.position.set(4.5, -0.5, -2);
-            scene.add(planet);
+            // Inner Bioluminescent Pulsing Glow Core
+            const coreGeo = new THREE.IcosahedronGeometry(2.7, 2);
+            const coreMat = new THREE.MeshBasicMaterial({
+                color: 0x00f0ff,
+                transparent: true,
+                opacity: 0.85,
+                wireframe: false
+            });
+            innerGlowCore = new THREE.Mesh(coreGeo, coreMat);
+            crystalGroup.add(innerGlowCore);
 
-            const crystalGeo = new THREE.IcosahedronGeometry(4.1, 2);
-            const crystalMat = new THREE.MeshBasicMaterial({
-                color: 0x38bdf8,
+            // Delicate Exoskeleton Wireframe Cage
+            const cageGeo = new THREE.IcosahedronGeometry(3.75, 2);
+            const cageMat = new THREE.MeshBasicMaterial({
+                color: 0xc084fc,
                 wireframe: true,
                 transparent: true,
-                opacity: 0.25
+                opacity: 0.4
             });
-            crystalShell = new THREE.Mesh(crystalGeo, crystalMat);
-            planet.add(crystalShell);
+            wireframeExoCage = new THREE.Mesh(cageGeo, cageMat);
+            crystalGroup.add(wireframeExoCage);
 
-            const haloGeo = new THREE.SphereGeometry(4.4, 64, 64);
-            const haloMat = new THREE.MeshBasicMaterial({
-                color: 0xc084fc,
-                side: THREE.BackSide,
-                transparent: true,
-                opacity: 0.35
-            });
-            atmosphereHalo = new THREE.Mesh(haloGeo, haloMat);
-            planet.add(atmosphereHalo);
+            // Sci-Fi Orbital Energy Rings (Energy Veins)
+            for (let r = 0; r < 2; r++) {
+                const ringGeo = new THREE.TorusGeometry(4.3 + r * 0.4, 0.03, 16, 100);
+                const ringMat = new THREE.MeshBasicMaterial({
+                    color: r === 0 ? 0x38bdf8 : 0xf43f5e,
+                    transparent: true,
+                    opacity: 0.6
+                });
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.rotation.x = Math.PI / (2 + r);
+                ring.rotation.y = Math.PI / (3 * (r + 1));
+                crystalGroup.add(ring);
+                energyRings.push(ring);
+            }
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+            scene.add(crystalGroup);
+
+            // 6. Directional Source Lighting & Shadows
+            const ambientLight = new THREE.AmbientLight(0x0f172a, 1.5);
             scene.add(ambientLight);
 
-            const cyanLight = new THREE.DirectionalLight(0x38bdf8, 3.0);
-            cyanLight.position.set(12, 12, 10);
-            scene.add(cyanLight);
+            // Angled Key Light (Specular Reflection)
+            const keyLight = new THREE.DirectionalLight(0x38bdf8, 4.0);
+            keyLight.position.set(16, 14, 12);
+            scene.add(keyLight);
 
-            const magentaLight = new THREE.PointLight(0xf43f5e, 3.5, 60);
-            magentaLight.position.set(-10, -8, 8);
-            scene.add(magentaLight);
+            // Purple Accent Point Light
+            const purpleLight = new THREE.PointLight(0xc084fc, 4.5, 50);
+            purpleLight.position.set(-12, -8, 6);
+            scene.add(purpleLight);
 
+            // Back Rim Highlight Spot Light
+            const rimLight = new THREE.SpotLight(0xf43f5e, 6.0);
+            rimLight.position.set(0, 5, -15);
+            rimLight.lookAt(crystalGroup.position);
+            scene.add(rimLight);
+
+            // Mouse Interactive Tilt Listener
             document.addEventListener('mousemove', (e) => {
                 mouseX = (e.clientX - window.innerWidth / 2) * 0.0006;
                 mouseY = (e.clientY - window.innerHeight / 2) * 0.0006;
             });
 
             window.addEventListener('resize', onWindowResize);
-            animate3D();
+            animateDeepSpace();
         }
 
         function onWindowResize() {
@@ -1073,19 +1122,39 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function animate3D() {
-            requestAnimationFrame(animate3D);
+        function animateDeepSpace() {
+            requestAnimationFrame(animateDeepSpace);
+            const elapsedTime = clock.getElapsedTime();
 
-            if (starfield) starfield.rotation.y += 0.0004;
-            if (planet) {
-                planet.rotation.y += 0.0025;
-                planet.rotation.x += 0.0008;
+            // Rotate Crystal Nucleus & Components
+            if (crystalNucleus) {
+                crystalNucleus.rotation.y += 0.004;
+                crystalNucleus.rotation.x += 0.002;
             }
-            if (crystalShell) {
-                crystalShell.rotation.y -= 0.003;
-                crystalShell.rotation.z += 0.001;
+            if (innerGlowCore) {
+                innerGlowCore.rotation.y -= 0.006;
+                // Pulsing inner glow using sine wave
+                const pulse = 0.75 + Math.sin(elapsedTime * 2.5) * 0.2;
+                innerGlowCore.material.opacity = pulse;
+            }
+            if (wireframeExoCage) {
+                wireframeExoCage.rotation.y -= 0.002;
+                wireframeExoCage.rotation.z += 0.001;
             }
 
+            // Rotate Energy Rings
+            energyRings.forEach((ring, idx) => {
+                ring.rotation.z += 0.005 * (idx + 1);
+                ring.rotation.x += 0.002 * (idx + 1);
+            });
+
+            // Slowly drift Starfield and Nebula Clouds
+            if (deepStarfield) deepStarfield.rotation.y += 0.0003;
+            nebulaClouds.forEach((cloud, idx) => {
+                cloud.rotation.y += 0.0005 * (idx % 2 === 0 ? 1 : -1);
+            });
+
+            // Smooth 3D Camera Parallax (Cockpit Window feel)
             camera.position.x += (mouseX * 18 - camera.position.x) * 0.05;
             camera.position.y += (-mouseY * 18 - camera.position.y) * 0.05;
             camera.lookAt(scene.position);
@@ -1093,10 +1162,10 @@
             renderer.render(scene, camera);
         }
 
-        window.addEventListener('DOMContentLoaded', init3DVibrantCosmos);
+        window.addEventListener('DOMContentLoaded', initSciFiDeepSpaceEngine);
 
 
-        /* ================= 2. STATE, THEME & ZEN MODE ================= */
+        /* ================= STATE, THEME & ZEN MODE ================= */
         let appState = {
             models: [],
             settings: {},
@@ -1136,15 +1205,14 @@
             if (appState.isZenMode) {
                 appContainer.classList.add('zen-hidden');
                 restoreBtn.style.display = 'flex';
-                showToast('Đã ẩn giao diện (Chế độ ngắm 3D). Nhấn ESC để hiện lại.');
+                showToast('Đã kích hoạt Chế độ Ngắm 3D Crystal Core (ESC)');
             } else {
                 appContainer.classList.remove('zen-hidden');
                 restoreBtn.style.display = 'none';
-                showToast('Đã hiện lại giao diện');
+                showToast('Đã hiện lại giao diện điều khiển');
             }
         }
 
-        // Global key shortcut for Zen mode (ESC key)
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 toggleZenMode();
@@ -1186,7 +1254,6 @@
             const headerSelect = document.getElementById('header-model-select');
             if (headerSelect && headerSelect.value !== value) headerSelect.value = value;
 
-            // Re-generate default output path if input file is selected
             if (appState.inputFile && window.pywebview) {
                 window.pywebview.api.generate_default_output_path(appState.inputFile, value).then(newPath => {
                     if (newPath) {
@@ -1210,7 +1277,7 @@
             }
         }
 
-        /* ================= 3. PYWEBVIEW BINDING ================= */
+        /* PYWEBVIEW BINDING */
         window.addEventListener('pywebviewready', function() {
             if (window.pywebview && window.pywebview.api) {
                 window.pywebview.api.get_initial_data().then(data => {
