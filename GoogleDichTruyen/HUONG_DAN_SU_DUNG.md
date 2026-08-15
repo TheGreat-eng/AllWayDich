@@ -1,111 +1,59 @@
 # Hướng dẫn sử dụng GoogleDichTruyen
 
 ## 1) Mục đích
-`GoogleDichTruyen.py` là app GUI (Tkinter) để dịch truyện `.txt` bằng Google Gemini, có:
+`GoogleDichTruyen` là ứng dụng GUI chuyên nghiệp để dịch truyện `.txt` bằng Google Gemini AI, có:
+- Giao diện CustomTkinter hiện đại, hỗ trợ Dark / Light mode linh hoạt
+- Tách module sạch sẽ (`core/`, `ui/`) dễ dàng mở rộng & nâng cấp
 - Chia chunk thông minh theo chương/đoạn
 - Dịch đa luồng
 - Tạm dừng / tiếp tục / dừng hẳn
 - Resume tiến trình bằng checkpoint
-- Theo dõi lịch sử và chi phí (USD + VNĐ)
+- Quản lý từ điển Glossary & tự động scan thuật ngữ AI
+- Xem, sửa & dịch lại từng chunk bị lỗi
+- Theo dõi lịch sử dịch và chi phí chi tiết (USD + VNĐ)
 
 ## 2) Yêu cầu môi trường
 - Windows + Python 3.10+ (khuyến nghị)
 - Thư viện Python:
   - `google-genai`
+  - `customtkinter`
 
 Cài thư viện:
 ```powershell
-pip install google-genai
+pip install google-genai customtkinter
 ```
 
 ## 3) Cách chạy app
-Mở terminal tại thư mục `GoogleDichTruyen` rồi chạy:
+Mở terminal tại thư mục `GoogleDichTruyen` rồi chạy phiên bản CustomTkinter giao diện mới:
 ```powershell
-python GoogleDichTruyen.py
+python app.py
 ```
+
+*(Lưu ý: Bạn vẫn có thể chạy `python GoogleDichTruyen.py` nếu muốn dùng phiên bản Tkinter truyền thống)*
 
 ## 4) Chuẩn bị trước khi dịch
 ### API key
 - Nhập **Gemini API Key** lấy từ Google AI Studio.
-- Hỗ trợ quản lý và lưu trữ nhiều API Key khác nhau. Bạn có thể chọn nhanh từ thanh chọn, đổi tên, thêm mới hoặc xóa key.
-- Key được mã hóa khi lưu trong `app_settings.json` (ưu tiên dùng lại trên cùng máy/user).
+- Key được mã hóa an toàn bằng khóa máy khi lưu trong `app_settings.json`.
 
 ### File đầu vào
 - Chọn file truyện `.txt` trong tab **Dịch truyện**.
 - Output tạo tự động cùng thư mục input theo dạng:
   - `Dich_tenfile_XXXX.txt`
 
-## 5) Các giới hạn tham số (app sẽ kiểm tra)
-- **Số luồng**: `1` đến `20`
-- **Chunk size**: `500` đến `50000`
-- **Max output tokens**: `256` đến `65536`
-- **Nhiệt độ**: `0` đến `1`
-
-### Glossary/Từ điển thuật ngữ
+## 5) Glossary / Từ điển thuật ngữ
 - Có ô nhập riêng trong phần **Prompt dịch giả** để giữ nhất quán tên riêng, cảnh giới, xưng hô.
 - Cú pháp mỗi dòng:
-  - `nguồn => đích`
-  - hoặc `nguồn -> đích`
-  - hoặc `nguồn: đích`
-- Ví dụ:
-  - `筑基 => Trúc Cơ`
-  - `师兄 => sư huynh`
-  - `本座 => bổn tọa`
-- Dòng trống hoặc dòng bắt đầu bằng `#` sẽ được bỏ qua.
-- Glossary được lưu cùng cài đặt và tự áp vào prompt khi bấm dịch.
-
-Nếu nhập ngoài khoảng này, app sẽ báo lỗi trước khi chạy.
+  - `nguồn => đích` (ví dụ: `筑基 => Trúc Cơ`, `师兄 => sư huynh`)
+- Bấm **🔍 Scan Truyện** để AI tự động trích xuất các thuật ngữ quan trọng trong tác phẩm.
 
 ## 6) Quy trình dịch
-1. Chọn hoặc thêm mới/đổi tên Gemini API key phù hợp
+1. Nhập Gemini API key
 2. Chọn file input `.txt`
-3. Chọn model, số luồng, chunk size, max output tokens, nhiệt độ
-4. Chọn hoặc thêm mới/đổi tên Prompt dịch giả trong ô **Prompt dịch giả**
-5. Bấm **🚀 BẮT ĐẦU DỊCH**
+3. Chọn model, số luồng, chunk size, nhiệt độ
+4. Bấm **🚀 BẮT ĐẦU DỊCH**
 
 Trong lúc dịch:
 - **⏸️ TẠM DỪNG**: dừng tạm tất cả luồng
 - **▶️ TIẾP TỤC**: chạy lại
 - **🛑 DỪNG HẲN**: dừng và giữ tiến trình để resume
-
-## 7) Resume / checkpoint
-- App tạo file checkpoint cạnh file input:
-  - `tenfile.resume.json`
-- Mở lại app và chạy dịch, nếu có checkpoint app sẽ hỏi dịch tiếp.
-- Khi hoàn tất toàn bộ, checkpoint bị xóa tự động.
-- Để xem hoặc dịch lại từng đoạn sau khi hoàn tất, app dùng cache riêng
-  `tenfile.chunks.json`; file này không bao giờ được dùng để resume.
-
-## 8) Ý nghĩa các tab
-- **🚀 Dịch truyện**: cấu hình + điều khiển chạy
-- **🔍 Xem Chunk**: tải và xem trước các chunk sau khi chia
-- **🗂️ Lịch sử dịch**: xem trạng thái, token, chi phí từng lần dịch
-- **💰 Thống kê chi phí**: tổng hợp theo tháng/tuần, có cả VNĐ
-
-## 9) File dữ liệu app
-- `app_settings.json`: lưu cấu hình lần gần nhất
-- `translation_history.json`: lịch sử dịch
-- `*.resume.json`: checkpoint tạm của bản dịch chưa hoàn tất
-- `*.chunks.json`: cache bản dịch hoàn tất để xem/chỉnh từng chunk
-
-## 10) Lỗi thường gặp & cách xử lý
-### Báo thiếu thư viện `google-genai`
-- Cài lại:
-```powershell
-pip install google-genai
-```
-
-### Gemini trả về rỗng / lỗi API / giới hạn quota
-- Giảm **Số luồng**
-- Giảm **Chunk size**
-- Giảm **Max output tokens**
-- Đổi model khác
-- Kiểm tra API key và hạn mức tài khoản
-
-### Không chọn được file hoặc lỗi đọc file
-- Đảm bảo file input tồn tại
-- Nên dùng file UTF-8 để giảm lỗi ký tự
-
-## 11) Lưu ý an toàn
-- Không chia sẻ `app_settings.json` và `translation_history.json`.
-- Không commit dữ liệu nhạy cảm lên Git.

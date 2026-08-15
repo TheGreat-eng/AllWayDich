@@ -3,17 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AWSDichTruyen 3D Studio - Smooth Glowing Sun Edition</title>
+    <title>AWSDichTruyen 3D Studio - Synthwave ROG Cyberpunk & Deep Space</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome CDN -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Three.js CDN -->
+    <!-- Three.js Core & Addons CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- OrbitControls CDN -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+    <!-- Three.js Post-Processing & Unreal Bloom Shaders -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
     <style>
         :root {
             /* Deep Space Sci-Fi Color Tokens (Default Dark) */
@@ -84,11 +92,36 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: var(--bg-body);
+            background-color: #0b0f19;
+            background-image: url('models/pin_bg_3.jpg');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: high-quality;
             font-family: var(--font-family);
             color: var(--text-main);
             -webkit-font-smoothing: antialiased;
             transition: background-color 0.4s ease, color 0.4s ease;
+        }
+
+        /* 1st Person 4K Live Wallpaper Layer */
+        #bg-wallpaper-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-image: url('models/pin_bg_3.jpg');
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: high-quality;
+            filter: contrast(105%) brightness(102%);
+            transition: background-image 0.4s ease, transform 0.08s ease-out;
+            transform: scale(1.05); /* Allow room for 1st-person mouse parallax tilt */
         }
 
         /* 3D Canvas Background */
@@ -98,7 +131,7 @@
             left: 0;
             width: 100vw;
             height: 100vh;
-            z-index: 0;
+            z-index: 2;
             pointer-events: none;
         }
 
@@ -686,7 +719,8 @@
     </style>
 </head>
 <body>
-    <!-- 3D Canvas Background -->
+    <!-- 1st Person 4K Live Wallpaper Layer & 3D Canvas -->
+    <div id="bg-wallpaper-layer"></div>
     <div id="canvas-container"></div>
 
     <!-- Sci-Fi Holographic Zen View Restoration Button -->
@@ -723,8 +757,32 @@
                 </div>
             </nav>
 
-            <!-- Header Controls: API Key, Model Select & Zen Mode / Theme / Translucency -->
+            <!-- Header Controls: 3D Scene Switcher, API Key, Model Select & Zen Mode / Theme / Translucency -->
             <div class="header-inputs">
+                <div class="header-input-item">
+                    <span class="header-input-label" style="color: var(--accent-cyan);"><i class="fa-solid fa-image"></i> Nền App:</span>
+                    <select class="custom-select" id="bg-selector" onchange="switchBackground(this.value)">
+                        <optgroup label="🌸 Pinterest 4K Live Wallpapers">
+                            <option value="pin_sakura" selected>🌸 Cầu Hoa Anh Đào (Pinterest Sakura 4K)</option>
+                            <option value="pin_cyber">✨ 4K Cyber Aesthetic Horizon (Pinterest Live)</option>
+                            <option value="pin_fantasy">🏯 Phong Cảnh Huyền Ảo (Pinterest Concept)</option>
+                        </optgroup>
+                        <optgroup label="🌐 Three.js 3D Models">
+                            <option value="anime">🏯 Thành Phố Anime 3D (Littlest Tokyo)</option>
+                            <option value="space">🌌 Trạm Vũ Trụ Sci-Fi (Ion Engine 3D)</option>
+                            <option value="cyberpunk">🤖 Cyberpunk Mecha (Expressive 3D)</option>
+                        </optgroup>
+                        <optgroup label="📁 Tự Chọn Nền">
+                            <option value="custom_file">🖼️ Tải Ảnh / Video Nền Từ Máy Tính...</option>
+                        </optgroup>
+                    </select>
+                    <input type="file" id="custom-bg-input" accept="image/*,video/*" style="display:none;" onchange="handleCustomBgUpload(event)">
+                </div>
+
+                <button class="btn-action-secondary" id="bloom-toggle-btn" onclick="toggleBloomFX()" title="Bật / Tắt Hiệu ứng Bloom Neon Hậu kỳ Điện ảnh">
+                    <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--accent-gold);"></i> <span id="bloom-btn-text">Bloom FX: Bật</span>
+                </button>
+
                 <div class="header-input-item">
                     <span class="header-input-label"><i class="fa-solid fa-key"></i> API Key:</span>
                     <div class="custom-input-box">
@@ -746,7 +804,7 @@
                     <i class="fa-solid fa-moon"></i> <span id="theme-btn-text">Tối</span>
                 </button>
 
-                <button class="btn-action-secondary" onclick="toggleZenMode()" title="Ẩn giao diện & Xoay 360° Mặt Trời 3D">
+                <button class="btn-action-secondary" onclick="toggleZenMode()" title="Ẩn giao diện & Xoay 360° Nền 3D">
                     <i class="fa-solid fa-eye-slash"></i> <span>Ẩn UI (3D 360°)</span>
                 </button>
             </div>
@@ -967,11 +1025,28 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <!-- 3D CLEAN GLOWING SUN & STARFIELD ENGINE -->
+    <!-- 3D SYNTHWAVE / ROG CYBERPUNK & DEEP SPACE ENGINE -->
     <script>
         let scene, camera, renderer, orbitControls;
+        let composer, bloomPass, isBloomEnabled = true;
+        let spaceGroup, cyberGroup, animeGroup, liveWallpaperGroup;
+        let wallpaperMesh, wallpaperMaterial, wallpaperTextures = {};
+        let liveSakuraParticles, liveSakuraVel = [];
         let glowingSunCore, sunPointLight;
         let fgStarPoints, midStarPoints, deepStarPoints, milkyWayPoints;
+        
+        // Cyberpunk Synthwave ROG Engine variables
+        let highwayMesh, highwayTexture;
+        let buildingGroup;
+        let cyberBikeGroup, engineParticles, engineParticleCount = 350, engineVel = [];
+        let emblemGroup;
+        let synthwaveSunMesh;
+        let cyberFog, animeFog;
+
+        // Anime 3D Toon Engine variables
+        let sakuraParticles, sakuraParticleCount = 800, sakuraVel = [];
+        let animeIslandsGroup, animeObeliskGroup, spiritOrbs;
+        
         let mouseX = 0, mouseY = 0;
         let clock = new THREE.Clock();
 
@@ -982,7 +1057,6 @@
             canvas.height = 512;
             const ctx = canvas.getContext('2d');
 
-            // Solid background gradient
             const baseGrad = ctx.createLinearGradient(0, 0, 0, 512);
             baseGrad.addColorStop(0, '#ff2200');
             baseGrad.addColorStop(0.3, '#ffaa00');
@@ -991,7 +1065,6 @@
             ctx.fillStyle = baseGrad;
             ctx.fillRect(0, 0, 512, 512);
 
-            // Overlapping smooth random noise blobs (No stripes, no seam artifacts)
             for (let i = 0; i < 400; i++) {
                 const x = Math.random() * 512;
                 const y = Math.random() * 512;
@@ -1006,7 +1079,7 @@
                     blobGrad.addColorStop(0, 'rgba(204, 68, 0, 0.7)');
                     blobGrad.addColorStop(0.7, 'rgba(255, 51, 0, 0.3)');
                 } else {
-                    blobGrad.addColorStop(0, 'rgba(50, 8, 0, 0.85)'); // Sunspots
+                    blobGrad.addColorStop(0, 'rgba(50, 8, 0, 0.85)');
                     blobGrad.addColorStop(0.5, 'rgba(120, 20, 0, 0.4)');
                 }
                 blobGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -1069,21 +1142,202 @@
             return new THREE.CanvasTexture(canvas);
         }
 
+        // Cyberpunk Procedural Building Window Texture
+        function createCyberBuildingTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
 
-        /* 2. THREE.JS ENGINE INIT */
-        function initSciFiDeepSpaceEngine() {
+            ctx.fillStyle = '#0a0e1a';
+            ctx.fillRect(0, 0, 256, 512);
+
+            const rows = 32;
+            const cols = 8;
+            const wWidth = 18;
+            const wHeight = 8;
+            const padX = 12;
+            const padY = 7;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const x = c * (wWidth + padX) + 10;
+                    const y = r * (wHeight + padY) + 12;
+
+                    const rand = Math.random();
+                    if (rand < 0.35) {
+                        ctx.fillStyle = '#00f0ff';
+                        ctx.shadowColor = '#00f0ff';
+                        ctx.shadowBlur = 6;
+                    } else if (rand < 0.6) {
+                        ctx.fillStyle = '#ff00aa';
+                        ctx.shadowColor = '#ff00aa';
+                        ctx.shadowBlur = 6;
+                    } else if (rand < 0.75) {
+                        ctx.fillStyle = '#ffaa00';
+                        ctx.shadowColor = '#ffaa00';
+                        ctx.shadowBlur = 4;
+                    } else {
+                        ctx.fillStyle = '#12192c';
+                        ctx.shadowBlur = 0;
+                    }
+                    ctx.fillRect(x, y, wWidth, wHeight);
+                }
+            }
+
+            for (let i = 0; i < 4; i++) {
+                const ly = Math.random() * 500;
+                ctx.fillStyle = i % 2 === 0 ? '#00f0ff' : '#ff00aa';
+                ctx.shadowColor = ctx.fillStyle;
+                ctx.shadowBlur = 10;
+                ctx.fillRect(0, ly, 256, 4);
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            return texture;
+        }
+
+        // Cyberpunk Procedural Highway Surface Texture
+        function createHighwayTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#060814';
+            ctx.fillRect(0, 0, 512, 512);
+
+            // Side Neon Borders (Magenta)
+            ctx.fillStyle = '#ff007f';
+            ctx.shadowColor = '#ff007f';
+            ctx.shadowBlur = 15;
+            ctx.fillRect(0, 0, 16, 512);
+            ctx.fillRect(496, 0, 16, 512);
+
+            // Center Cyan Lanes
+            ctx.fillStyle = '#00f0ff';
+            ctx.shadowColor = '#00f0ff';
+            ctx.shadowBlur = 12;
+
+            ctx.fillRect(250, 0, 4, 512);
+            ctx.fillRect(258, 0, 4, 512);
+
+            for (let y = 0; y < 512; y += 64) {
+                ctx.fillRect(128, y + 12, 6, 40);
+                ctx.fillRect(378, y + 12, 6, 40);
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(1, 20);
+            return texture;
+        }
+
+        // Synthwave Sun Gradient Texture
+        function createSynthwaveSunTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            const grad = ctx.createLinearGradient(0, 0, 0, 512);
+            grad.addColorStop(0, '#ffe600');
+            grad.addColorStop(0.4, '#ff007f');
+            grad.addColorStop(0.85, '#9900ff');
+            grad.addColorStop(1, '#1a0033');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 512, 512);
+
+            ctx.fillStyle = '#1a0033';
+            let lineH = 4;
+            for (let y = 260; y < 512; y += lineH + 6) {
+                ctx.fillRect(0, y, 512, lineH);
+                lineH += 1.8;
+            }
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createToonGradientTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 4;
+            canvas.height = 1;
+            const ctx = canvas.getContext('2d');
+            const colors = ['#1e293b', '#475569', '#94a3b8', '#ffffff'];
+            for (let i = 0; i < 4; i++) {
+                ctx.fillStyle = colors[i];
+                ctx.fillRect(i, 0, 1, 1);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.minFilter = THREE.NearestFilter;
+            tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        function createSakuraPetalTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.beginPath();
+            ctx.moveTo(32, 10);
+            ctx.bezierCurveTo(46, 10, 54, 24, 46, 46);
+            ctx.bezierCurveTo(38, 56, 26, 56, 18, 46);
+            ctx.bezierCurveTo(10, 24, 18, 10, 32, 10);
+            ctx.closePath();
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, '#f472b6');
+            grad.addColorStop(0.65, '#f43f5e');
+            grad.addColorStop(1, 'rgba(244, 114, 182, 0.1)');
+            ctx.fillStyle = grad;
+            ctx.fill();
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        /* 2. THREE.JS ENGINE & MULTI-SCENE 3D INIT */
+        let animMixers = [];
+
+        function initSciFiEngine() {
             const container = document.getElementById('canvas-container');
 
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 0, 16);
+            camera.position.set(0, 0, 18);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(0x000000, 0.0);
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.35;
+            renderer.toneMappingExposure = 1.0;
             container.appendChild(renderer.domElement);
+
+            // Setup EffectComposer (Unreal Bloom Pass)
+            if (typeof THREE.EffectComposer !== 'undefined') {
+                try {
+                    composer = new THREE.EffectComposer(renderer);
+                    const renderPass = new THREE.RenderPass(scene, camera);
+                    composer.addPass(renderPass);
+
+                    bloomPass = new THREE.UnrealBloomPass(
+                        new THREE.Vector2(window.innerWidth, window.innerHeight),
+                        0.35, // strength (balanced glow, no overexposure)
+                        0.3,  // radius
+                        0.75  // threshold (only bright highlights bloom)
+                    );
+                    composer.addPass(bloomPass);
+                } catch (e) {
+                    console.warn('EffectComposer initialization warning:', e);
+                    composer = null;
+                }
+            }
+
+            // Fogs
+            cyberFog = new THREE.FogExp2(0x0f172a, 0.008);
+            animeFog = new THREE.FogExp2(0x1e1b4b, 0.006);
 
             // OrbitControls
             if (THREE.OrbitControls) {
@@ -1095,187 +1349,346 @@
                 orbitControls.minDistance = 5;
             }
 
+            // Create Groups
+            liveWallpaperGroup = new THREE.Group();
+            spaceGroup = new THREE.Group();
+            cyberGroup = new THREE.Group();
+            animeGroup = new THREE.Group();
+
+            spaceGroup.visible = false;
+            cyberGroup.visible = false;
+            animeGroup.visible = false;
+            liveWallpaperGroup.visible = true; // Default Active: Pinterest Sakura 4K Live Wallpaper!
+
+            scene.add(liveWallpaperGroup);
+            scene.add(spaceGroup);
+            scene.add(cyberGroup);
+            scene.add(animeGroup);
+
+            // Pinterest 4K Live Wallpaper Scene Background Setup
+            const textureLoader = new THREE.TextureLoader();
+            wallpaperTextures['pin_sakura'] = textureLoader.load('models/pin_bg_3.jpg');
+            wallpaperTextures['pin_cyber'] = textureLoader.load('models/pin_bg_1.jpg');
+            wallpaperTextures['pin_fantasy'] = textureLoader.load('models/pin_bg_2.jpg');
+
+            // Set 4K Pinterest wallpaper directly as Three.js WebGL scene background
+            scene.background = wallpaperTextures['pin_sakura'];
+
+            // Floating 3D Sakura Petal Particles over Live Wallpaper
+            const sakuraTextureForLive = createSakuraPetalTexture();
+            const liveSakuraGeo = new THREE.BufferGeometry();
+            const liveSakuraCount = 350;
+            const liveSakuraPos = new Float32Array(liveSakuraCount * 3);
+            liveSakuraVel = [];
+            for (let i = 0; i < liveSakuraCount; i++) {
+                liveSakuraPos[i * 3] = (Math.random() - 0.5) * 50;
+                liveSakuraPos[i * 3 + 1] = Math.random() * 30 - 15;
+                liveSakuraPos[i * 3 + 2] = (Math.random() - 0.5) * 20 - 5;
+                liveSakuraVel.push({
+                    vx: (Math.random() - 0.5) * 0.02 + 0.008,
+                    vy: -Math.random() * 0.03 - 0.01,
+                    vz: (Math.random() - 0.5) * 0.02
+                });
+            }
+            liveSakuraGeo.setAttribute('position', new THREE.BufferAttribute(liveSakuraPos, 3));
+            liveSakuraParticles = new THREE.Points(liveSakuraGeo, new THREE.PointsMaterial({
+                size: 2.8,
+                map: sakuraTextureForLive,
+                transparent: true,
+                opacity: 0.85,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            }));
+            liveWallpaperGroup.add(liveSakuraParticles);
+
+            // Lighting Setup
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+            scene.add(ambientLight);
+
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x333333, 0.8);
+            hemiLight.position.set(0, 50, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+            dirLight.position.set(20, 40, 20);
+            scene.add(dirLight);
+
             const starTexture = createGlowingStarTexture();
             const nebulaTexture = createNebulaPuffTexture();
+            const toonRamp = createToonGradientTexture();
+            const sakuraTexture = createSakuraPetalTexture();
 
-            // Astronomical Spectral Palette
-            const spectralColors = [
-                new THREE.Color(0x38bdf8),
-                new THREE.Color(0xe0f2fe),
-                new THREE.Color(0xfef08a),
-                new THREE.Color(0xf87171),
-                new THREE.Color(0xffffff)
-            ];
+            // =======================================================
+            // 1. ANIME FANTASY 3D SCENE (animeGroup)
+            // =======================================================
+            animeIslandsGroup = new THREE.Group();
 
-            // 1. Group 1: Foreground Stars (500 stars)
+            // Floating Island Base & Rocks
+            const rockMat = new THREE.MeshToonMaterial({ color: 0x475569, gradientMap: toonRamp });
+            const islandBase = new THREE.Mesh(new THREE.DodecahedronGeometry(14, 1), rockMat);
+            islandBase.scale.set(1.5, 0.8, 1.2);
+            islandBase.position.set(0, -10, -35);
+            animeIslandsGroup.add(islandBase);
+
+            const grassMat = new THREE.MeshToonMaterial({ color: 0x10b981, gradientMap: toonRamp });
+            const grassTop = new THREE.Mesh(new THREE.CylinderGeometry(18, 14, 4, 12), grassMat);
+            grassTop.position.set(0, -6, -35);
+            animeIslandsGroup.add(grassTop);
+
+            // Floating Crystal Obelisk
+            animeObeliskGroup = new THREE.Group();
+            animeObeliskGroup.position.set(0, 4, -35);
+
+            const crystalMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.15, roughness: 0.2, metalness: 0.8, transparent: true, opacity: 0.85 });
+            const crystalMesh = new THREE.Mesh(new THREE.OctahedronGeometry(6, 0), crystalMat);
+            animeObeliskGroup.add(crystalMesh);
+
+            const toonRing = new THREE.Mesh(new THREE.TorusGeometry(10, 0.4, 16, 64), new THREE.MeshToonMaterial({ color: 0xfacc15, gradientMap: toonRamp }));
+            toonRing.rotation.x = Math.PI / 3;
+            animeObeliskGroup.add(toonRing);
+
+            animeIslandsGroup.add(animeObeliskGroup);
+
+            const smallIsland1 = new THREE.Mesh(new THREE.DodecahedronGeometry(5, 1), grassMat);
+            smallIsland1.position.set(-32, 2, -50);
+            animeIslandsGroup.add(smallIsland1);
+
+            const smallIsland2 = new THREE.Mesh(new THREE.DodecahedronGeometry(7, 1), grassMat);
+            smallIsland2.position.set(35, -4, -60);
+            animeIslandsGroup.add(smallIsland2);
+
+            animeGroup.add(animeIslandsGroup);
+
+            // Sakura Petals Particles
+            const sakuraGeo = new THREE.BufferGeometry();
+            const sakuraPos = new Float32Array(sakuraParticleCount * 3);
+            const sakuraCol = new Float32Array(sakuraParticleCount * 3);
+            const sakuraPalette = [new THREE.Color(0xf472b6), new THREE.Color(0xfb7185), new THREE.Color(0xf43f5e), new THREE.Color(0xffedd5)];
+            for (let i = 0; i < sakuraParticleCount; i++) {
+                sakuraPos[i * 3] = (Math.random() - 0.5) * 120;
+                sakuraPos[i * 3 + 1] = Math.random() * 80 - 20;
+                sakuraPos[i * 3 + 2] = (Math.random() - 0.5) * 100 - 10;
+                sakuraVel.push({ vx: (Math.random() - 0.5) * 0.04 + 0.01, vy: -Math.random() * 0.06 - 0.02, vz: (Math.random() - 0.5) * 0.03 });
+                const c = sakuraPalette[Math.floor(Math.random() * sakuraPalette.length)];
+                sakuraCol[i * 3] = c.r; sakuraCol[i * 3 + 1] = c.g; sakuraCol[i * 3 + 2] = c.b;
+            }
+            sakuraGeo.setAttribute('position', new THREE.BufferAttribute(sakuraPos, 3));
+            sakuraGeo.setAttribute('color', new THREE.BufferAttribute(sakuraCol, 3));
+            sakuraParticles = new THREE.Points(sakuraGeo, new THREE.PointsMaterial({ size: 4.5, map: sakuraTexture, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+            animeGroup.add(sakuraParticles);
+
+            // =======================================================
+            // 2. CYBERPUNK SYNTHWAVE 3D SCENE (cyberGroup)
+            // =======================================================
+            highwayTexture = createHighwayTexture();
+            const highwayGeo = new THREE.PlaneGeometry(30, 450);
+            const highwayMat = new THREE.MeshBasicMaterial({ map: highwayTexture, side: THREE.DoubleSide });
+            highwayMesh = new THREE.Mesh(highwayGeo, highwayMat);
+            highwayMesh.rotation.x = -Math.PI / 2;
+            highwayMesh.position.set(0, -6, -110);
+            cyberGroup.add(highwayMesh);
+
+            buildingGroup = new THREE.Group();
+            const buildingTexture = createCyberBuildingTexture();
+            for (let i = 0; i < 55; i++) {
+                const w = Math.random() * 12 + 6, h = Math.random() * 55 + 20, d = Math.random() * 12 + 6;
+                const bGeo = new THREE.BoxGeometry(w, h, d);
+                const sideMat = new THREE.MeshStandardMaterial({ map: buildingTexture, roughness: 0.3, metalness: 0.7, emissive: 0x00f0ff, emissiveIntensity: 0.25 });
+                const topMat = new THREE.MeshBasicMaterial({ color: 0x0a001a });
+                const building = new THREE.Mesh(bGeo, [sideMat, sideMat, topMat, topMat, sideMat, sideMat]);
+                building.position.set((i % 2 === 0 ? 1 : -1) * (Math.random() * 25 + 22), h / 2 - 6, -i * 8 + 20);
+                buildingGroup.add(building);
+            }
+            cyberGroup.add(buildingGroup);
+
+            cyberBikeGroup = new THREE.Group();
+            const bikeBody = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 2.8), new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2, metalness: 0.9, emissive: 0x38bdf8, emissiveIntensity: 0.3 }));
+            bikeBody.position.set(0, 0.7, 0);
+            cyberBikeGroup.add(bikeBody);
+            cyberBikeGroup.position.set(0, -5.3, 10.5);
+            cyberGroup.add(cyberBikeGroup);
+
+            const engineGeo = new THREE.BufferGeometry();
+            const enginePos = new Float32Array(engineParticleCount * 3);
+            const engineCol = new Float32Array(engineParticleCount * 3);
+            const fireColors = [new THREE.Color(0xff0055), new THREE.Color(0xff3300), new THREE.Color(0xffaa00), new THREE.Color(0x00f0ff)];
+            for (let i = 0; i < engineParticleCount; i++) {
+                enginePos[i * 3] = (Math.random() - 0.5) * 0.5; enginePos[i * 3 + 1] = -4.8 + (Math.random() - 0.5) * 0.4; enginePos[i * 3 + 2] = 11.9 + Math.random() * 0.5;
+                engineVel.push({ vx: (Math.random() - 0.5) * 0.06, vy: (Math.random() - 0.5) * 0.04 + 0.02, vz: Math.random() * 0.35 + 0.15 });
+                const c = fireColors[Math.floor(Math.random() * fireColors.length)];
+                engineCol[i * 3] = c.r; engineCol[i * 3 + 1] = c.g; engineCol[i * 3 + 2] = c.b;
+            }
+            engineGeo.setAttribute('position', new THREE.BufferAttribute(enginePos, 3));
+            engineGeo.setAttribute('color', new THREE.BufferAttribute(engineCol, 3));
+            engineParticles = new THREE.Points(engineGeo, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+            cyberGroup.add(engineParticles);
+
+            emblemGroup = new THREE.Group();
+            emblemGroup.position.set(0, 14, -110);
+            const outerEmblemMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(10, 0), new THREE.MeshStandardMaterial({ color: 0xff00aa, wireframe: true, emissive: 0xff00aa, emissiveIntensity: 0.8 }));
+            emblemGroup.add(outerEmblemMesh);
+            const innerEmblemMesh = new THREE.Mesh(new THREE.OctahedronGeometry(5.5, 0), new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }));
+            emblemGroup.add(innerEmblemMesh);
+            cyberGroup.add(emblemGroup);
+
+            const sunHorizonMesh = new THREE.Mesh(new THREE.SphereGeometry(30, 64, 64), new THREE.MeshBasicMaterial({ map: createSynthwaveSunTexture() }));
+            sunHorizonMesh.position.set(0, 10, -180);
+            cyberGroup.add(sunHorizonMesh);
+
+            // =======================================================
+            // 3. VŨ TRỤ DEEP SPACE 3D SCENE (spaceGroup)
+            // =======================================================
+            const spectralColors = [new THREE.Color(0x38bdf8), new THREE.Color(0xe0f2fe), new THREE.Color(0xfef08a), new THREE.Color(0xf87171), new THREE.Color(0xffffff)];
+
             const fgGeo = new THREE.BufferGeometry();
             const fgPos = new Float32Array(500 * 3);
             const fgCol = new Float32Array(500 * 3);
             for (let i = 0; i < 500; i++) {
-                fgPos[i * 3] = (Math.random() - 0.5) * 250;
-                fgPos[i * 3 + 1] = (Math.random() - 0.5) * 250;
-                fgPos[i * 3 + 2] = (Math.random() - 0.5) * 150 + 20;
-
+                fgPos[i * 3] = (Math.random() - 0.5) * 250; fgPos[i * 3 + 1] = (Math.random() - 0.5) * 250; fgPos[i * 3 + 2] = (Math.random() - 0.5) * 150 + 20;
                 const c = spectralColors[Math.floor(Math.random() * spectralColors.length)];
-                fgCol[i * 3] = c.r;
-                fgCol[i * 3 + 1] = c.g;
-                fgCol[i * 3 + 2] = c.b;
+                fgCol[i * 3] = c.r; fgCol[i * 3 + 1] = c.g; fgCol[i * 3 + 2] = c.b;
             }
             fgGeo.setAttribute('position', new THREE.BufferAttribute(fgPos, 3));
             fgGeo.setAttribute('color', new THREE.BufferAttribute(fgCol, 3));
-            fgStarPoints = new THREE.Points(fgGeo, new THREE.PointsMaterial({
-                size: 3.2,
-                map: starTexture,
-                vertexColors: true,
-                transparent: true,
-                opacity: 1.0,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
-            }));
-            scene.add(fgStarPoints);
+            fgStarPoints = new THREE.Points(fgGeo, new THREE.PointsMaterial({ size: 3.2, map: starTexture, vertexColors: true, transparent: true, opacity: 1.0, depthWrite: false, blending: THREE.AdditiveBlending }));
+            spaceGroup.add(fgStarPoints);
 
-            // 2. Group 2: Midground Stars (4,500 stars)
             const midGeo = new THREE.BufferGeometry();
             const midPos = new Float32Array(4500 * 3);
             const midCol = new Float32Array(4500 * 3);
             for (let i = 0; i < 4500; i++) {
-                midPos[i * 3] = (Math.random() - 0.5) * 400;
-                midPos[i * 3 + 1] = (Math.random() - 0.5) * 400;
-                midPos[i * 3 + 2] = (Math.random() - 0.5) * 300;
-
+                midPos[i * 3] = (Math.random() - 0.5) * 400; midPos[i * 3 + 1] = (Math.random() - 0.5) * 400; midPos[i * 3 + 2] = (Math.random() - 0.5) * 300;
                 const c = spectralColors[Math.floor(Math.random() * spectralColors.length)];
-                midCol[i * 3] = c.r;
-                midCol[i * 3 + 1] = c.g;
-                midCol[i * 3 + 2] = c.b;
+                midCol[i * 3] = c.r; midCol[i * 3 + 1] = c.g; midCol[i * 3 + 2] = c.b;
             }
             midGeo.setAttribute('position', new THREE.BufferAttribute(midPos, 3));
             midGeo.setAttribute('color', new THREE.BufferAttribute(midCol, 3));
-            midStarPoints = new THREE.Points(midGeo, new THREE.PointsMaterial({
-                size: 1.6,
-                map: starTexture,
-                vertexColors: true,
-                transparent: true,
-                opacity: 1.0,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
-            }));
-            scene.add(midStarPoints);
+            midStarPoints = new THREE.Points(midGeo, new THREE.PointsMaterial({ size: 1.6, map: starTexture, vertexColors: true, transparent: true, opacity: 1.0, depthWrite: false, blending: THREE.AdditiveBlending }));
+            spaceGroup.add(midStarPoints);
 
-            // 3. Group 3: Deep Space Stars (15,000 micro stars)
             const deepGeo = new THREE.BufferGeometry();
             const deepPos = new Float32Array(15000 * 3);
             const deepCol = new Float32Array(15000 * 3);
             for (let i = 0; i < 15000; i++) {
-                deepPos[i * 3] = (Math.random() - 0.5) * 500;
-                deepPos[i * 3 + 1] = (Math.random() - 0.5) * 500;
-                deepPos[i * 3 + 2] = -80 - Math.random() * 350;
-
+                deepPos[i * 3] = (Math.random() - 0.5) * 500; deepPos[i * 3 + 1] = (Math.random() - 0.5) * 500; deepPos[i * 3 + 2] = -80 - Math.random() * 350;
                 const c = spectralColors[Math.floor(Math.random() * spectralColors.length)];
-                deepCol[i * 3] = c.r;
-                deepCol[i * 3 + 1] = c.g;
-                deepCol[i * 3 + 2] = c.b;
+                deepCol[i * 3] = c.r; deepCol[i * 3 + 1] = c.g; deepCol[i * 3 + 2] = c.b;
             }
             deepGeo.setAttribute('position', new THREE.BufferAttribute(deepPos, 3));
             deepGeo.setAttribute('color', new THREE.BufferAttribute(deepCol, 3));
-            deepStarPoints = new THREE.Points(deepGeo, new THREE.PointsMaterial({
-                size: 0.8,
-                map: starTexture,
-                vertexColors: true,
-                transparent: true,
-                opacity: 0.9,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
-            }));
-            scene.add(deepStarPoints);
+            deepStarPoints = new THREE.Points(deepGeo, new THREE.PointsMaterial({ size: 0.8, map: starTexture, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+            spaceGroup.add(deepStarPoints);
 
-            // 4. Milky Way Dust Belt
             const mwGeo = new THREE.BufferGeometry();
             const mwCount = 2500;
             const mwPos = new Float32Array(mwCount * 3);
             const mwCol = new Float32Array(mwCount * 3);
-            const milkyWayPalette = [
-                new THREE.Color(0x06b6d4),
-                new THREE.Color(0xa855f7),
-                new THREE.Color(0xec4899),
-                new THREE.Color(0x3b82f6)
-            ];
-
+            const milkyWayPalette = [new THREE.Color(0x06b6d4), new THREE.Color(0xa855f7), new THREE.Color(0xec4899), new THREE.Color(0x3b82f6)];
             for (let i = 0; i < mwCount; i++) {
                 const dist = (Math.random() - 0.5) * 450;
                 const spread = (Math.random() - 0.5) * 90;
-                const depth = (Math.random() - 0.5) * 150 - 40;
-
-                const x = dist * Math.cos(Math.PI / 4) - spread * Math.sin(Math.PI / 4);
-                const y = dist * Math.sin(Math.PI / 4) + spread * Math.cos(Math.PI / 4);
-                const z = depth;
-
-                mwPos[i * 3] = x;
-                mwPos[i * 3 + 1] = y;
-                mwPos[i * 3 + 2] = z;
-
+                mwPos[i * 3] = dist * Math.cos(Math.PI / 4) - spread * Math.sin(Math.PI / 4);
+                mwPos[i * 3 + 1] = dist * Math.sin(Math.PI / 4) + spread * Math.cos(Math.PI / 4);
+                mwPos[i * 3 + 2] = (Math.random() - 0.5) * 150 - 40;
                 const c = milkyWayPalette[Math.floor(Math.random() * milkyWayPalette.length)];
-                mwCol[i * 3] = c.r;
-                mwCol[i * 3 + 1] = c.g;
-                mwCol[i * 3 + 2] = c.b;
+                mwCol[i * 3] = c.r; mwCol[i * 3 + 1] = c.g; mwCol[i * 3 + 2] = c.b;
             }
-
             mwGeo.setAttribute('position', new THREE.BufferAttribute(mwPos, 3));
             mwGeo.setAttribute('color', new THREE.BufferAttribute(mwCol, 3));
+            milkyWayPoints = new THREE.Points(mwGeo, new THREE.PointsMaterial({ size: 22, map: nebulaTexture, vertexColors: true, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending }));
+            spaceGroup.add(milkyWayPoints);
 
-            milkyWayPoints = new THREE.Points(mwGeo, new THREE.PointsMaterial({
-                size: 22,
-                map: nebulaTexture,
-                vertexColors: true,
-                transparent: true,
-                opacity: 0.12,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
-            }));
-            scene.add(milkyWayPoints);
-
-            // 5. SMOOTH GLOWING SUN (NO SPIKES, NO STRIPES)
             const sunGroup = new THREE.Group();
             sunGroup.position.set(4.2, -0.6, -1.5);
-
-            // Core Sun Sphere (SphereGeometry 3.2, 64, 64)
             const sunGeo = new THREE.SphereGeometry(3.2, 64, 64);
-            const sunTexture = createCleanSunTexture();
-            const sunMat = new THREE.MeshBasicMaterial({ map: sunTexture });
+            const sunMat = new THREE.MeshBasicMaterial({ map: createCleanSunTexture() });
             glowingSunCore = new THREE.Mesh(sunGeo, sunMat);
             sunGroup.add(glowingSunCore);
-
-            // Soft Radial Glow Sprite (100% Seamless Additive Glow, NO Spikes)
-            const glowTexture = createSunGlowTexture();
-            const sunGlowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-                map: glowTexture,
-                transparent: true,
-                opacity: 0.95,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false
-            }));
+            const sunGlowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: createSunGlowTexture(), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
             sunGlowSprite.scale.set(12, 12, 1);
             sunGroup.add(sunGlowSprite);
-
-            // Soft Outer Halo Sprite
-            const outerGlowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-                map: glowTexture,
-                transparent: true,
-                opacity: 0.5,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false
-            }));
-            outerGlowSprite.scale.set(18, 18, 1);
-            sunGroup.add(outerGlowSprite);
-
-            // Point Light at Sun center
             sunPointLight = new THREE.PointLight(0xffaa00, 5.0, 150);
             sunGroup.add(sunPointLight);
+            spaceGroup.add(sunGroup);
 
-            scene.add(sunGroup);
+            // =======================================================
+            // ASYNC GLTF ONLINE/LOCAL MODEL ENHANCERS (Loads in Background)
+            // =======================================================
+            if (typeof THREE.GLTFLoader !== 'undefined') {
+                const dracoLoader = (typeof THREE.DRACOLoader !== 'undefined') ? new THREE.DRACOLoader() : null;
+                if (dracoLoader) dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.3/');
 
-            // Ambient Light
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
-            scene.add(ambientLight);
+                const gltfLoader = new THREE.GLTFLoader();
+                if (dracoLoader) gltfLoader.setDRACOLoader(dracoLoader);
+                window.gltfLoader = gltfLoader;
+
+                // Smart loader: Try local path first, fallback to CDN
+                function loadGLTFSmart(localUrl, cdnUrl, onSuccess) {
+                    gltfLoader.load(
+                        localUrl,
+                        onSuccess,
+                        undefined,
+                        function () {
+                            console.log('Local model not found, falling back to CDN:', cdnUrl);
+                            gltfLoader.load(cdnUrl, onSuccess, undefined, function (err) {
+                                console.warn('GLTF Model Load Error:', err);
+                            });
+                        }
+                    );
+                }
+
+                // Load Model 1: Anime City into animeGroup (Littlest Tokyo)
+                loadGLTFSmart(
+                    'models/LittlestTokyo.glb',
+                    'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/LittlestTokyo.glb',
+                    function (gltf) {
+                        const model = gltf.scene;
+                        model.position.set(0, -3.5, -20);
+                        model.scale.set(0.016, 0.016, 0.016);
+                        animeGroup.add(model);
+                        if (gltf.animations && gltf.animations.length > 0) {
+                            const mixer = new THREE.AnimationMixer(model);
+                            gltf.animations.forEach(clip => mixer.clipAction(clip).play());
+                            animMixers.push(mixer);
+                        }
+                    }
+                );
+
+                // Load Model 2: Ion Drive Space Station into spaceGroup (Primary Ion Drive)
+                loadGLTFSmart(
+                    'models/PrimaryIonDrive.glb',
+                    'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/PrimaryIonDrive.glb',
+                    function (gltf) {
+                        const model = gltf.scene;
+                        model.position.set(0, -1, -25);
+                        model.scale.set(2.2, 2.2, 2.2);
+                        spaceGroup.add(model);
+                        if (gltf.animations && gltf.animations.length > 0) {
+                            const mixer = new THREE.AnimationMixer(model);
+                            gltf.animations.forEach(clip => mixer.clipAction(clip).play());
+                            animMixers.push(mixer);
+                        }
+                    }
+                );
+
+                // Load Model 3: Cyber Robot into cyberGroup (Robot Expressive)
+                loadGLTFSmart(
+                    'models/RobotExpressive.glb',
+                    'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
+                    function (gltf) {
+                        const model = gltf.scene;
+                        model.position.set(0, -5.5, -12);
+                        model.scale.set(1.5, 1.5, 1.5);
+                        cyberGroup.add(model);
+                        if (gltf.animations && gltf.animations.length > 0) {
+                            const mixer = new THREE.AnimationMixer(model);
+                            const clip = gltf.animations.find(a => a.name === 'Dance') || gltf.animations[0];
+                            mixer.clipAction(clip).play();
+                            animMixers.push(mixer);
+                        }
+                    }
+                );
+            }
 
             document.addEventListener('mousemove', (e) => {
                 mouseX = (e.clientX - window.innerWidth / 2) * 0.0006;
@@ -1283,54 +1696,272 @@
             });
 
             window.addEventListener('resize', onWindowResize);
-            animateDeepSpace();
+            animateSciFiEngine();
         }
 
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            if (composer) composer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function animateDeepSpace() {
-            requestAnimationFrame(animateDeepSpace);
+        function animateSciFiEngine() {
+            requestAnimationFrame(animateSciFiEngine);
+            const delta = clock.getDelta();
             const elapsedTime = clock.getElapsedTime();
 
-            // Smooth Sun Rotation (No UV offset glitches)
-            if (glowingSunCore) {
-                glowingSunCore.rotation.y += 0.0015;
+            // Update GLTF Model Animations
+            animMixers.forEach(mixer => mixer.update(delta));
+
+            // Live Wallpaper Parallax & Floating Sakura Drift
+            if (liveWallpaperGroup && liveWallpaperGroup.visible) {
+                liveWallpaperGroup.rotation.y += (mouseX * 0.12 - liveWallpaperGroup.rotation.y) * 0.05;
+                liveWallpaperGroup.rotation.x += (-mouseY * 0.08 - liveWallpaperGroup.rotation.x) * 0.05;
+
+                if (liveSakuraParticles) {
+                    const pos = liveSakuraParticles.geometry.attributes.position.array;
+                    for (let i = 0; i < 450; i++) {
+                        pos[i * 3] += liveSakuraVel[i].vx + Math.sin(elapsedTime + i) * 0.006;
+                        pos[i * 3 + 1] += liveSakuraVel[i].vy;
+                        pos[i * 3 + 2] += liveSakuraVel[i].vz;
+                        if (pos[i * 3 + 1] < -18) pos[i * 3 + 1] = 18;
+                        if (pos[i * 3] > 28) pos[i * 3] = -28;
+                    }
+                    liveSakuraParticles.geometry.attributes.position.needsUpdate = true;
+                }
             }
 
-            // Starfield Twinkling Animation
-            if (fgStarPoints) {
-                fgStarPoints.rotation.y += 0.0005;
-                fgStarPoints.material.opacity = 0.85 + Math.sin(elapsedTime * 3.5) * 0.15;
-            }
-            if (midStarPoints) {
-                midStarPoints.rotation.y += 0.0003;
-                midStarPoints.material.opacity = 0.8 + Math.cos(elapsedTime * 2.2) * 0.2;
-            }
-            if (deepStarPoints) {
-                deepStarPoints.rotation.y += 0.0001;
+            // Anime Scene Animations
+            if (animeGroup && animeGroup.visible) {
+                if (animeObeliskGroup) {
+                    animeObeliskGroup.rotation.y += 0.015;
+                    animeObeliskGroup.position.y = 4 + Math.sin(elapsedTime * 2.0) * 1.2;
+                }
+                if (animeIslandsGroup) {
+                    animeIslandsGroup.position.y = Math.sin(elapsedTime * 0.8) * 0.6;
+                }
+                if (sakuraParticles) {
+                    const pos = sakuraParticles.geometry.attributes.position.array;
+                    for (let i = 0; i < sakuraParticleCount; i++) {
+                        pos[i * 3] += sakuraVel[i].vx + Math.sin(elapsedTime + i) * 0.01;
+                        pos[i * 3 + 1] += sakuraVel[i].vy;
+                        pos[i * 3 + 2] += sakuraVel[i].vz;
+                        if (pos[i * 3 + 1] < -30) pos[i * 3 + 1] = 50;
+                    }
+                    sakuraParticles.geometry.attributes.position.needsUpdate = true;
+                }
             }
 
-            if (milkyWayPoints) {
-                milkyWayPoints.rotation.z += 0.00015;
+            // Cyberpunk Scene Animations
+            if (cyberGroup && cyberGroup.visible) {
+                if (highwayTexture) highwayTexture.offset.y -= 0.018;
+                if (cyberBikeGroup) cyberBikeGroup.position.y = -5.3 + Math.sin(elapsedTime * 10) * 0.05;
+                if (engineParticles) {
+                    const pos = engineParticles.geometry.attributes.position.array;
+                    for (let i = 0; i < engineParticleCount; i++) {
+                        pos[i * 3] += engineVel[i].vx; pos[i * 3 + 1] += engineVel[i].vy; pos[i * 3 + 2] += engineVel[i].vz;
+                        if (pos[i * 3 + 2] > 16.5) pos[i * 3 + 2] = 11.9;
+                    }
+                    engineParticles.geometry.attributes.position.needsUpdate = true;
+                }
+                if (emblemGroup) {
+                    emblemGroup.rotation.y += 0.012;
+                    emblemGroup.rotation.x += 0.006;
+                    emblemGroup.position.y = 14 + Math.sin(elapsedTime * 1.5) * 1.8;
+                }
             }
 
-            // OrbitControls update if enabled, else smooth parallax
+            // Space Scene Animations
+            if (spaceGroup && spaceGroup.visible) {
+                if (glowingSunCore) glowingSunCore.rotation.y += 0.0015;
+                if (fgStarPoints) fgStarPoints.rotation.y += 0.0005;
+                if (midStarPoints) midStarPoints.rotation.y += 0.0003;
+                if (deepStarPoints) deepStarPoints.rotation.y += 0.0001;
+                if (milkyWayPoints) milkyWayPoints.rotation.z += 0.00015;
+            }
+
+            // 1st Person Mouse Parallax Tilt on Background Layer
+            const bgLayer = document.getElementById('bg-wallpaper-layer');
+            if (bgLayer && bgLayer.style.display !== 'none') {
+                const moveX = mouseX * -35;
+                const moveY = mouseY * -25;
+                bgLayer.style.transform = `scale(1.08) translate(${moveX}px, ${moveY}px)`;
+            }
+
+            // Camera & First-Person POV Movement
             if (orbitControls && orbitControls.enabled) {
                 orbitControls.update();
+            } else if (liveWallpaperGroup && liveWallpaperGroup.visible) {
+                // Authentic First-Person POV (Góc nhìn thứ nhất 360)
+                camera.position.set(0, 0, 0);
+                const targetYaw = -mouseX * 1.5;
+                const targetPitch = mouseY * 1.0;
+                camera.rotation.y += (targetYaw - camera.rotation.y) * 0.06;
+                camera.rotation.x += (targetPitch - camera.rotation.x) * 0.06;
+                camera.rotation.z = 0;
             } else {
-                camera.position.x += (mouseX * 18 - camera.position.x) * 0.05;
-                camera.position.y += (-mouseY * 18 - camera.position.y) * 0.05;
+                camera.rotation.set(0, 0, 0);
+                camera.position.x += (mouseX * 15 - camera.position.x) * 0.04;
+                camera.position.y += (-mouseY * 15 - camera.position.y) * 0.04;
                 camera.lookAt(scene.position);
             }
 
-            renderer.render(scene, camera);
+            // Render
+            const isLiveWallpaperActive = liveWallpaperGroup && liveWallpaperGroup.visible;
+            if (composer && isBloomEnabled && !isLiveWallpaperActive) {
+                try {
+                    composer.render();
+                } catch (e) {
+                    renderer.render(scene, camera);
+                }
+            } else {
+                renderer.render(scene, camera);
+            }
         }
 
-        window.addEventListener('DOMContentLoaded', initSciFiDeepSpaceEngine);
+        // Multi-Scene Switcher Function
+        function switchBackground(type) {
+            const bgVideo = document.getElementById('bg-custom-video');
+            if (bgVideo) bgVideo.style.display = 'none';
+
+            const bgLayer = document.getElementById('bg-wallpaper-layer');
+
+            if (type === 'custom_file') {
+                document.getElementById('custom-bg-input').click();
+                return;
+            }
+
+            const isPin = type.startsWith('pin_');
+            if (liveWallpaperGroup) liveWallpaperGroup.visible = isPin;
+            if (spaceGroup) spaceGroup.visible = (type === 'space');
+            if (cyberGroup) cyberGroup.visible = (type === 'cyberpunk');
+            if (animeGroup) animeGroup.visible = (type === 'anime');
+
+            if (isPin) {
+                scene.fog = null;
+                const pinImages = {
+                    'pin_sakura': 'models/pin_bg_3.jpg',
+                    'pin_cyber': 'models/pin_bg_1.jpg',
+                    'pin_fantasy': 'models/pin_bg_2.jpg'
+                };
+                if (wallpaperTextures[type]) {
+                    scene.background = wallpaperTextures[type];
+                }
+                if (bgLayer && pinImages[type]) {
+                    bgLayer.style.display = 'block';
+                    bgLayer.style.backgroundImage = `url('${pinImages[type]}')`;
+                }
+                if (bloomPass) { bloomPass.strength = 0.25; bloomPass.threshold = 0.8; }
+                const titles = {
+                    'pin_sakura': '🌸 Cầu Hoa Anh Đào (Pinterest Sakura 4K)',
+                    'pin_cyber': '✨ 4K Cyber Aesthetic Horizon (Pinterest Live)',
+                    'pin_fantasy': '🏯 Phong Cảnh Huyền Ảo (Pinterest Concept)'
+                };
+                showToast('✨ Đã đổi nền: ' + (titles[type] || 'Pinterest Live Wallpaper'), 'fa-image');
+            } else {
+                scene.background = null;
+                if (bgLayer) bgLayer.style.display = 'none';
+                if (type === 'cyberpunk') {
+                    scene.fog = cyberFog;
+                    if (bloomPass) { bloomPass.strength = 0.4; bloomPass.threshold = 0.7; }
+                    showToast('🤖 Đã chuyển sang nền Cyberpunk Mecha 3D!', 'fa-robot');
+                } else if (type === 'space') {
+                    scene.fog = null;
+                    if (bloomPass) { bloomPass.strength = 0.35; bloomPass.threshold = 0.75; }
+                    showToast('🌌 Đã chuyển sang nền Trạm Vũ Trụ Sci-Fi (Ion Engine 3D)!', 'fa-user-astronaut');
+                } else {
+                    scene.fog = animeFog;
+                    if (bloomPass) { bloomPass.strength = 0.3; bloomPass.threshold = 0.75; }
+                    showToast('🌸 Đã chuyển sang nền Thành Phố Anime 3D (Littlest Tokyo)!', 'fa-city');
+                }
+            }
+        }
+
+        function handleCustomBgUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            const bgLayer = document.getElementById('bg-wallpaper-layer');
+
+            if (file.type.startsWith('video/')) {
+                scene.background = null;
+                if (bgLayer) bgLayer.style.display = 'none';
+                let bgVideo = document.getElementById('bg-custom-video');
+                if (!bgVideo) {
+                    bgVideo = document.createElement('video');
+                    bgVideo.id = 'bg-custom-video';
+                    bgVideo.autoplay = true;
+                    bgVideo.loop = true;
+                    bgVideo.muted = true;
+                    bgVideo.playsInline = true;
+                    bgVideo.style.position = 'fixed';
+                    bgVideo.style.top = '0';
+                    bgVideo.style.left = '0';
+                    bgVideo.style.width = '100vw';
+                    bgVideo.style.height = '100vh';
+                    bgVideo.style.objectFit = 'cover';
+                    bgVideo.style.zIndex = '-3';
+                    document.body.appendChild(bgVideo);
+                }
+                bgVideo.src = url;
+                bgVideo.style.display = 'block';
+                if (liveWallpaperGroup) liveWallpaperGroup.visible = true;
+                if (spaceGroup) spaceGroup.visible = false;
+                if (cyberGroup) cyberGroup.visible = false;
+                if (animeGroup) animeGroup.visible = false;
+                showToast('🎥 Đã áp dụng Video Live Wallpaper tự chọn!', 'fa-circle-play');
+            } else {
+                const imgTex = new THREE.TextureLoader().load(url);
+                scene.background = imgTex;
+                if (bgLayer) {
+                    bgLayer.style.display = 'block';
+                    bgLayer.style.backgroundImage = `url('${url}')`;
+                }
+                if (liveWallpaperGroup) liveWallpaperGroup.visible = true;
+                if (spaceGroup) spaceGroup.visible = false;
+                if (cyberGroup) cyberGroup.visible = false;
+                if (animeGroup) animeGroup.visible = false;
+                showToast('🖼️ Đã áp dụng Ảnh Nền tự chọn từ máy!', 'fa-image');
+            }
+        }
+
+        // Bloom FX Toggle Function
+        function toggleBloomFX() {
+            isBloomEnabled = !isBloomEnabled;
+            const btnText = document.getElementById('bloom-btn-text');
+            if (isBloomEnabled) {
+                btnText.textContent = 'Bloom FX: Bật';
+                showToast('✨ Đã BẬT Hiệu ứng Bloom Neon Hậu kỳ Điện ảnh');
+            } else {
+                btnText.textContent = 'Bloom FX: Tắt';
+                showToast('⚡ Đã TẮT Bloom FX (Tiết kiệm GPU)');
+            }
+        }
+
+        // Global GLTF Custom Model Loader Helper
+        window.gltfLoader = (typeof THREE.GLTFLoader !== 'undefined') ? new THREE.GLTFLoader() : null;
+
+        window.loadCustomGLTFModel = function(url, sceneName = 'anime', position = {x: 0, y: 0, z: -20}, scale = 1.0) {
+            if (!window.gltfLoader) {
+                showToast('GLTFLoader chưa sẵn sàng', 'fa-triangle-exclamation');
+                return;
+            }
+            showToast('Đang nạp Model 3D: ' + url, 'fa-spinner');
+            window.gltfLoader.load(url, function(gltf) {
+                const model = gltf.scene;
+                model.position.set(position.x, position.y, position.z);
+                model.scale.set(scale, scale, scale);
+                if (sceneName === 'cyberpunk') cyberGroup.add(model);
+                else if (sceneName === 'anime') animeGroup.add(model);
+                else spaceGroup.add(model);
+                showToast('✅ Đã nạp thành công Model 3D!', 'fa-circle-check');
+            }, undefined, function(error) {
+                showToast('Lỗi nạp Model GLTF: ' + error, 'fa-triangle-exclamation');
+            });
+        };
+
+        window.addEventListener('DOMContentLoaded', initSciFiEngine);
 
 
         /* STATE, THEME, TRANSLUCENCY & ZEN MODE WITH ORBIT CONTROLS */
@@ -1357,7 +1988,7 @@
                 body.classList.add('ultra-translucent');
                 btnText.textContent = 'Rõ Nền 3D';
                 btnIcon.className = 'fa-solid fa-eye';
-                showToast('Đã bật chế độ Siêu Mờ (Nhìn rõ Mặt Trời & Nền 3D)');
+                showToast('Đã bật chế độ Siêu Mờ (Nhìn rõ Nền 3D)');
             } else {
                 body.classList.remove('ultra-translucent');
                 btnText.textContent = 'Mờ UI';
@@ -1398,7 +2029,7 @@
                 if (orbitControls) {
                     orbitControls.enabled = true;
                 }
-                showToast('Đã mở 3D Interactive Zen Mode! Kéo chuột để xoay 360° Mặt Trời & Cuộn để Zoom.');
+                showToast('Đã mở 3D Interactive Zen Mode! Kéo chuột để xoay 360° Nền 3D & Cuộn để Zoom.');
             } else {
                 appContainer.classList.remove('zen-hidden');
                 canvasContainer.style.pointerEvents = 'none';
@@ -1407,7 +2038,11 @@
                     orbitControls.enabled = false;
                     orbitControls.reset();
                 }
-                camera.position.set(0, 0, 16);
+                if (liveWallpaperGroup && liveWallpaperGroup.visible) {
+                    camera.position.set(0, 0, 0);
+                } else {
+                    camera.position.set(0, 0, 16);
+                }
                 camera.lookAt(0, 0, 0);
                 showToast('Đã khóa góc nhìn chuẩn & Hiện lại giao diện');
             }

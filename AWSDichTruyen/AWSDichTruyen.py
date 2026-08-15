@@ -1518,15 +1518,23 @@ if saved_settings.get("theme"):
     btn_theme.config(text=f"{theme_icon} {'Tối' if current_theme == 'dark' else 'Sáng'}")
     apply_theme()
 
-# Đăng ký sự kiện đóng cửa sổ
-root.protocol("WM_DELETE_WINDOW", on_closing)
+# ================= CHẠY ỨNG DỤNG =================
+def start_application():
+    try:
+        import webview
+        from app import run_app
+        print("🚀 Khởi chạy AWSDichTruyen 3D Studio (Three.js Web Engine)...")
+        run_app()
+    except Exception as err:
+        print(f"⚠️ Không thể khởi chạy WebEngine 3D ({err}). Chuyển sang giao diện Tkinter cũ...")
+        add_log("📂 Đã tải cài đặt từ lần sử dụng trước.")
+        add_log("🔐 API Key được mã hóa khi lưu, chỉ hoạt động trên máy này.")
+        refresh_history_display()
+        try:
+            refresh_cost_stats()
+        except NameError:
+            pass
+        root.mainloop()
 
-add_log("📂 Đã tải cài đặt từ lần sử dụng trước.")
-add_log("🔐 API Key được mã hóa khi lưu, chỉ hoạt động trên máy này.")
-refresh_history_display()
-try:
-    refresh_cost_stats()
-except NameError:
-    pass
-
-root.mainloop()
+if __name__ == '__main__':
+    start_application()

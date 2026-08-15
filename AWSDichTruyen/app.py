@@ -592,13 +592,32 @@ class Api:
             self.is_stopped = False
 
 
-if __name__ == '__main__':
+import http.server
+import socketserver
+
+def start_local_server(directory):
+    class QuietHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=directory, **kwargs)
+        def log_message(self, format, *args):
+            pass
+
+    server = socketserver.TCPServer(('127.0.0.1', 0), QuietHandler)
+    port = server.server_address[1]
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    return f"http://127.0.0.1:{port}/index.html"
+
+def run_app():
     api = Api()
-    html_path = os.path.join(BASE_DIR, 'index.html')
+    try:
+        url = start_local_server(BASE_DIR)
+    except Exception:
+        url = os.path.join(BASE_DIR, 'index.html')
     
     window = webview.create_window(
         title='AWSDichTruyen 3D Studio - Powered by AWS Bedrock',
-        url=html_path,
+        url=url,
         js_api=api,
         width=1380,
         height=900,
@@ -608,3 +627,7 @@ if __name__ == '__main__':
     )
     api.set_window(window)
     webview.start(debug=True)
+
+if __name__ == '__main__':
+    run_app()
+

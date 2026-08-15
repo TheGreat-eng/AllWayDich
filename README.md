@@ -1,4 +1,4 @@
-# DichTruyen - Bộ công cụ dịch truyện bằng AI trên Windows
+# DichTruyen - Bộ công cụ dịch truyện bằng AI trên Windows - Old-Version
 
 DichTruyen là bộ ứng dụng desktop Tkinter chuyên dịch truyện `.txt` sang tiếng Việt thuần, ưu tiên văn phong tự nhiên, mượt và giữ đúng ý nghĩa gốc. Dự án có nhiều app riêng cho từng nhà cung cấp hoặc kiểu triển khai, cùng chung một triết lý:
 
